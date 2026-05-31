@@ -1,0 +1,21 @@
+{
+  "name": "platform-brawl",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "pnpm --parallel run dev",
+    "dev:client": "pnpm --filter client dev",
+    "dev:server": "pnpm --filter server dev"
+  },
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "msgpackr-extract"
+    ]
+  }
+}

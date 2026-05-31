@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: platform-brawl-server
+    env: node
+    region: oregon
+    plan: free
+    rootDir: .
+    buildCommand: npm install -g pnpm && pnpm install --frozen-lockfile && pnpm --filter server build
+    startCommand: pnpm --filter server start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        generateValue: false
