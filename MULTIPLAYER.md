@@ -120,17 +120,17 @@ Causa: `shared/package.json` tinha `typescript` em `devDependencies` mas o `pnpm
 #### Observação importante sobre o Render
 O `render.yaml` só é lido na **criação do serviço**. Mudanças posteriores precisam ser feitas manualmente no dashboard. O serviço foi criado com build command incorreto (`pnpm install && pnpm --filter server build`).
 
-### Para continuar — único passo pendente
+### Status: PAUSADO (2026-06-03)
 
-No dashboard do Render → serviço `platform-brawl` → **Settings → Build Command**, trocar para:
+Implementação do modo multiplayer pausada indefinidamente. Não continuar agora.
 
-```
-pnpm install --no-frozen-lockfile && pnpm --filter shared build && pnpm --filter server build
-```
-
-Depois clicar em **Manual Deploy → Deploy latest commit** (vai usar o commit `7e2b09c`).
-
-O Start Command está correto: `pnpm --filter server start`
+Se retomar no futuro, o único passo de infra pendente é:
+- No dashboard do Render → serviço `platform-brawl` → **Settings → Build Command**, trocar para:
+  ```
+  pnpm install --no-frozen-lockfile && pnpm --filter shared build && pnpm --filter server build
+  ```
+- Clicar em **Manual Deploy → Deploy latest commit** (commit `7e2b09c`)
+- O Start Command já está correto: `pnpm --filter server start`
 
 ---
 
