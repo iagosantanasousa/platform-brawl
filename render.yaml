@@ -5,7 +5,7 @@ services:
     region: oregon
     plan: free
     rootDir: .
-    buildCommand: npm install -g pnpm && pnpm install && pnpm --filter server build
+    buildCommand: pnpm install && pnpm --filter shared build && pnpm --filter server build
     startCommand: pnpm --filter server start
     envVars:
       - key: NODE_ENV
