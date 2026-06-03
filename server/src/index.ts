@@ -8,7 +8,7 @@ const gameServer = new Server({
 
 gameServer.define('battle', BattleRoom);
 
-const PORT = Number(process.env.PORT ?? 4000);
+const PORT = Number(process.env.PORT) || 4000;
 
 gameServer.listen(PORT)
   .then(() => console.log(`[Colyseus] listening on port ${PORT}`))
