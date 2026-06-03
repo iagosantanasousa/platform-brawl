@@ -96,28 +96,41 @@
 
 ## Onde paramos
 
-O código está pronto e buildando sem erros. O problema pendente é o **deploy do servidor**.
+O código está pronto. O servidor foi criado no Render mas ainda não buildou com sucesso.
 
-### Problema de versão (resolvido no código, não testado em prod)
-`colyseus.js` 0.16 (cliente) é incompatível com `@colyseus/core` 0.17 (servidor) no protocolo do matchmaker. O `colyseusClient.ts` já contém o workaround (`toV016Format`), mas **ainda não foi testado em produção**.
+### O que foi feito nesta sessão (2026-06-03)
 
-### Deploy pendente
-- Repositório criado no GitHub: `github.com/iagosantanasousa/platform-brawl`
-- Servidor ainda **não deployado** no Render
-- Faltou: criar o Web Service no Render apontando para o repositório
+#### Fixes commitados e no GitHub (`main`, commit `7e2b09c`)
 
-### Para continuar o deploy
-1. Acessar **render.com** → New → Web Service → conectar `iagosantanasousa/platform-brawl`
-2. Configurar:
-   - Build: `npm install -g pnpm && pnpm install --frozen-lockfile && pnpm --filter server build`
-   - Start: `pnpm --filter server start`
-3. Após o deploy, pegar a URL gerada (ex: `https://platform-brawl-server.onrender.com`)
-4. Editar `client/src/game/network/colyseusClient.ts` linha com `RAW_URL`, trocar o fallback:
-   ```ts
-   ?? 'wss://platform-brawl-server.onrender.com'
-   ```
-5. Fazer `pnpm --filter client build`
-6. Arrastar `client/dist` para o Netlify
+- **`client/src/game/network/colyseusClient.ts`** — URL de produção corrigida de `wss://platform-brawl-server.onrender.com` para `wss://platform-brawl.onrender.com` (nome real do serviço criado no Render)
+- **`render.yaml`** — removida a entrada `PORT` com `generateValue: false` (sem `value:` injetava `PORT=""` → `Number("")` = `0` → servidor escutava na porta randômica)
+- **`server/src/index.ts`** — `Number(process.env.PORT ?? 4000)` → `Number(process.env.PORT) || 4000` para tratar `PORT=""` corretamente
+- **`shared/package.json`** — removido `typescript` de `devDependencies` (havia sido adicionado sem atualizar o lockfile, quebrando o pnpm frozen-lockfile no CI do Render)
+
+#### Diagnóstico do problema de deploy
+
+O Render estava falhando com:
+```
+ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with "frozen-lockfile" because
+pnpm-lock.yaml is not up to date with <ROOT>/shared/package.json
+```
+
+Causa: `shared/package.json` tinha `typescript` em `devDependencies` mas o `pnpm-lock.yaml` commitado não refletia essa mudança.
+
+#### Observação importante sobre o Render
+O `render.yaml` só é lido na **criação do serviço**. Mudanças posteriores precisam ser feitas manualmente no dashboard. O serviço foi criado com build command incorreto (`pnpm install && pnpm --filter server build`).
+
+### Para continuar — único passo pendente
+
+No dashboard do Render → serviço `platform-brawl` → **Settings → Build Command**, trocar para:
+
+```
+pnpm install --no-frozen-lockfile && pnpm --filter shared build && pnpm --filter server build
+```
+
+Depois clicar em **Manual Deploy → Deploy latest commit** (vai usar o commit `7e2b09c`).
+
+O Start Command está correto: `pnpm --filter server start`
 
 ---
 
