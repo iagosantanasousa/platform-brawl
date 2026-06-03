@@ -1,17 +1,14 @@
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import express from 'express';
-import { createServer } from 'http';
 import { BattleRoom } from './rooms/BattleRoom';
 
-const app = express();
-const httpServer = createServer(app);
-
-app.use(express.json());
-app.get('/health', (_req, res) => res.json({ ok: true }));
-
 const gameServer = new Server({
-  transport: new WebSocketTransport({ server: httpServer }),
+  transport: new WebSocketTransport(),
+  // Let Colyseus own the HTTP server so /matchmake/* routes bind correctly.
+  // Custom routes are added here via the express callback.
+  express: async (app) => {
+    app.get('/health', (_req: any, res: any) => res.json({ ok: true }));
+  },
 });
 
 gameServer.define('battle', BattleRoom);
