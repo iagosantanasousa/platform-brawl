@@ -69,23 +69,7 @@ export class TrainingScene extends BaseScene {
       (proj) => (proj as Projectile).destroy(),
     );
 
-    // Projectile ↔ dummy
-    this.physics.add.overlap(
-      this.projectiles,
-      this.dummy,
-      (proj, target) => {
-        const p = proj as Projectile;
-        const d = target as Dummy;
-        if (p.ownerId === 'player' && !p.getData('hit')) {
-          p.setData('hit', true);
-          const cfg = CHARACTER_CONFIGS[this.config.characterType];
-          const body = p.body as Phaser.Physics.Arcade.Body | null;
-          const kbDir = body && body.velocity.x >= 0 ? 1 : -1;
-          d.hitDummy(cfg.attackDamage, cfg.knockbackForce * kbDir);
-          p.destroy();
-        }
-      },
-    );
+    // Projectile ↔ dummy — checked manually each frame (see checkProjectileHits)
 
     // UI — setScrollFactor(0) keeps them fixed on screen regardless of camera
     this.modeText = this.add.text(map.width / 2, 16, 'MODO TREINO', {
@@ -163,10 +147,12 @@ export class TrainingScene extends BaseScene {
         }
       }
 
-      // Attack
-      if (this.isAttack() && this.player.attackCooldown <= 0) {
-        this.player.attackCooldown = cfg.attackCooldown;
-        this.performAttack();
+      // Attack — archer uses hold-to-aim, others use press
+      if (this.config.characterType === 'archer') {
+        this.handleArcherAim(cfg);
+      } else if (this.isAttack() && this.player.attackCooldown <= 0) {
+        const cooldownMult = this.performAttack();
+        this.player.attackCooldown = cfg.attackCooldown * cooldownMult;
       }
 
       // Ground slide trigger — no velocity requirement, direction from facing.
@@ -194,6 +180,7 @@ export class TrainingScene extends BaseScene {
 
     this.player.update(delta);
     this.dummy.update(delta);
+    this.checkProjectileHits();
 
     // Update UI
     const cd = Math.max(0, this.player.attackCooldown);
@@ -294,11 +281,70 @@ export class TrainingScene extends BaseScene {
     // 'dashing' ticks inside Player.update()
   }
 
-  private performAttack() {
+  private checkProjectileHits() {
+    if (!this.dummy.active) return;
+    const cfg = CHARACTER_CONFIGS[this.config.characterType];
+    const dBody = this.dummy.body as Phaser.Physics.Arcade.Body;
+    const dr = new Phaser.Geom.Rectangle(dBody.x, dBody.y, dBody.width, dBody.height);
+
+    this.projectiles.getChildren().forEach(go => {
+      const p = go as Projectile;
+      if (!p.active || p.getData('hit')) return;
+      const pBody = p.body as Phaser.Physics.Arcade.Body;
+      const pr = new Phaser.Geom.Rectangle(pBody.x, pBody.y, pBody.width, pBody.height);
+      if (Phaser.Geom.Rectangle.Overlaps(pr, dr)) {
+        p.setData('hit', true);
+        const kbDir = pBody.velocity.x >= 0 ? 1 : -1;
+        this.dummy.hitDummy(p.damage, cfg.knockbackForce * kbDir);
+        p.destroy();
+      }
+    });
+  }
+
+  private handleArcherAim(cfg: (typeof CHARACTER_CONFIGS)[keyof typeof CHARACTER_CONFIGS]) {
+    const held = this.isArcherAimHeld();
+
+    if (held && this.player.attackCooldown <= 0) {
+      if (!this.player.archerAiming) {
+        this.player.startArcherAim(this.player.facing === 'right');
+      }
+      const { dx, dy } = this.getArcherAimDir(this.player.facing);
+      this.player.updateArcherAim(dx, dy);
+    } else if (!held && this.player.archerAiming) {
+      this.fireArrow(cfg);
+      this.player.cancelArcherAim();
+      this.player.attackCooldown = cfg.attackCooldown;
+    }
+  }
+
+  private fireArrow(cfg: (typeof CHARACTER_CONFIGS)[keyof typeof CHARACTER_CONFIGS]) {
+    const speed = cfg.projectileSpeed ?? 750;
+    const len = Math.sqrt(this.player.archerAimDx ** 2 + this.player.archerAimDy ** 2) || 1;
+    const vx = (this.player.archerAimDx / len) * speed;
+    const vy = (this.player.archerAimDy / len) * speed;
+
+    const proj = new Projectile(
+      this,
+      this.player.x + (vx > 0 ? 16 : -16),
+      this.player.y - 10,
+      'archer',
+      'player',
+      vx,
+      vy,
+    );
+    this.projectiles.add(proj, false);
+
+    // Re-apply after group.add() resets the physics body via world.enableBody()
+    const body = proj.body as Phaser.Physics.Arcade.Body;
+    body.setAllowGravity(false);
+    body.setVelocity(vx, vy);
+  }
+
+  private performAttack(): number {
     const cfg = CHARACTER_CONFIGS[this.config.characterType];
 
-    // Trigger attack animation (fighter sprite has its own anim)
-    this.player.triggerAttackAnim();
+    // Trigger attack animation — returns cooldown multiplier (0.5 for attack1, 1 for attack2)
+    const cooldownMult = this.player.triggerAttackAnim();
 
     if (cfg.isRanged) {
       const projSpeed = cfg.projectileSpeed ?? 600;
@@ -325,6 +371,7 @@ export class TrainingScene extends BaseScene {
         this.dummy.hitDummy(cfg.attackDamage, kbDir * cfg.knockbackForce * 0.4);
       }
     }
+    return cooldownMult;
   }
 
   private showMeleeEffect() {

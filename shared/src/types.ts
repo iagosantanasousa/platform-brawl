@@ -1,4 +1,4 @@
-export type CharacterType = 'fighter' | 'runner' | 'tank';
+export type CharacterType = 'fighter' | 'archer' | 'tank';
 
 export type MapId = 'arena' | 'corridors';
 

@@ -6,6 +6,11 @@ export const touchInput = {
   // One-shot flags: set true on press, cleared by BaseScene after being read.
   jumpPressed: false,
   attackPressed: false,
+  attackHeld: false,
+  // Archer aim joystick
+  archerAimHeld: false,
+  archerAimX: 0,  // -1..1
+  archerAimY: 0,  // -1..1
   // Combo joystick: held while dragging, released to dash.
   comboHeld: false,
   comboAimX: 0,  // -1..1 normalised from combo button drag

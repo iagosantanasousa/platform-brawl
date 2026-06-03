@@ -189,9 +189,91 @@ function ComboAimButton() {
   );
 }
 
+// ─── Archer Aim Button (drag-joystick, fires on release) ─────────────────────
+
+const AIM_RADIUS  = 44;
+const AIM_DEADZONE = 8;
+
+function ArcherAimButton() {
+  const baseRef = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState({ x: 0, y: 0 });
+  const [active, setActive] = useState(false);
+  const activeId = useRef<number | null>(null);
+
+  function clamped(dx: number, dy: number) {
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist > AIM_RADIUS
+      ? { dx: (dx / dist) * AIM_RADIUS, dy: (dy / dist) * AIM_RADIUS }
+      : { dx, dy };
+  }
+
+  function offsetFromCenter(e: React.PointerEvent) {
+    const rect = baseRef.current!.getBoundingClientRect();
+    return clamped(
+      e.clientX - (rect.left + rect.width / 2),
+      e.clientY - (rect.top + rect.height / 2),
+    );
+  }
+
+  function applyAim(dx: number, dy: number) {
+    touchInput.archerAimX = Math.abs(dx) > AIM_DEADZONE ? dx / AIM_RADIUS : 0;
+    touchInput.archerAimY = Math.abs(dy) > AIM_DEADZONE ? dy / AIM_RADIUS : 0;
+  }
+
+  function onDown(e: React.PointerEvent) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    activeId.current = e.pointerId;
+    setActive(true);
+    touchInput.archerAimHeld = true;
+    const { dx, dy } = offsetFromCenter(e);
+    setThumb({ x: dx, y: dy });
+    applyAim(dx, dy);
+  }
+
+  function onMove(e: React.PointerEvent) {
+    if (activeId.current !== e.pointerId) return;
+    const { dx, dy } = offsetFromCenter(e);
+    setThumb({ x: dx, y: dy });
+    applyAim(dx, dy);
+  }
+
+  function onUp(e: React.PointerEvent) {
+    if (activeId.current !== e.pointerId) return;
+    activeId.current = null;
+    setActive(false);
+    setThumb({ x: 0, y: 0 });
+    touchInput.archerAimHeld = false;
+    touchInput.archerAimX = 0;
+    touchInput.archerAimY = 0;
+  }
+
+  return (
+    <div
+      ref={baseRef}
+      className={`w-24 h-24 rounded-full border-2 relative flex items-center justify-center touch-none transition-colors duration-100 ${
+        active
+          ? 'bg-yellow-400/40 border-yellow-300/80'
+          : 'bg-yellow-500/20 border-yellow-400/50'
+      }`}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+    >
+      <span className="text-yellow-200 text-xs font-black select-none pointer-events-none">AIM</span>
+      <div
+        className="w-10 h-10 rounded-full bg-yellow-300/70 border-2 border-yellow-200 pointer-events-none absolute"
+        style={{ transform: `translate(${thumb.x}px, ${thumb.y}px)` }}
+      />
+    </div>
+  );
+}
+
 // ─── Touch Controls overlay ──────────────────────────────────────────────────
 
 function TouchControls({ config }: { config: GameConfig }) {
+  const isArcher = config.characterType === 'archer';
+
   return (
     <div className="absolute inset-0 pointer-events-none z-20 select-none">
       {/* Joystick — bottom left */}
@@ -201,10 +283,16 @@ function TouchControls({ config }: { config: GameConfig }) {
 
       {/* Action buttons — bottom right */}
       <div className="absolute bottom-8 right-8 flex gap-4 pointer-events-auto">
-        <button
-          className="w-20 h-20 bg-red-500/50 border-2 border-red-400/60 rounded-full text-white text-sm font-black active:bg-red-500/80 touch-none"
-          onPointerDown={() => { touchInput.attackPressed = true; }}
-        >ATK</button>
+
+        {/* Archer: aim joystick replaces ATK button */}
+        {isArcher ? (
+          <ArcherAimButton />
+        ) : (
+          <button
+            className="w-20 h-20 bg-red-500/50 border-2 border-red-400/60 rounded-full text-white text-sm font-black active:bg-red-500/80 touch-none"
+            onPointerDown={() => { touchInput.attackPressed = true; }}
+          >ATK</button>
+        )}
 
         <div className="flex flex-col gap-3 items-center">
           <ComboAimButton />

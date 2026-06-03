@@ -57,20 +57,40 @@ export abstract class BaseScene extends Phaser.Scene {
     this.load.image('map_bg', '/sprites/background.png');
 
     // Character sprite sheets – 256×256 px per frame, displayed at scale 0.5
-    const v = '?v=256x256';
+    const v = '?v=256x256b';
+    // Fighter sprites
     this.load.spritesheet('fighter_idle',       `/sprites/fighter/idle.png${v}`,       { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_run',        `/sprites/fighter/run.png${v}`,        { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_jump',       `/sprites/fighter/jump.png${v}`,       { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_fall',       `/sprites/fighter/fall.png${v}`,       { frameWidth: 256, frameHeight: 256 });
-    this.load.spritesheet('fighter_attack',     `/sprites/fighter/attack.png${v}`,     { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('fighter_attack',      `/sprites/fighter/attack.png${v}`,      { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('fighter_attack2',     `/sprites/fighter/attack2.png${v}`,     { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_hurt',       `/sprites/fighter/hurt.png${v}`,       { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_death',      `/sprites/fighter/death.png${v}`,      { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_wall_slide', `/sprites/fighter/wall_slide.png${v}`, { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_wall_jump',  `/sprites/fighter/wall_jump.png${v}`,  { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_slide',      `/sprites/fighter/slide.png${v}`,      { frameWidth: 256, frameHeight: 256 });
+    // Archer sprites
+    this.load.spritesheet('archer_idle',       `/sprites/archer/idle.png${v}`,       { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_run',        `/sprites/archer/run.png${v}`,        { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_jump',       `/sprites/archer/jump.png${v}`,       { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_fall',       `/sprites/archer/fall.png${v}`,       { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_attack',     `/sprites/archer/attack.png${v}`,     { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_attack2',    `/sprites/archer/attack2.png${v}`,    { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_hurt',       `/sprites/archer/hurt.png${v}`,       { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_death',      `/sprites/archer/death.png${v}`,      { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_wall_slide', `/sprites/archer/wall_slide.png${v}`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_wall_jump',  `/sprites/archer/wall_jump.png${v}`,  { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_slide',      `/sprites/archer/slide.png${v}`,      { frameWidth: 256, frameHeight: 256 });
+
+    // Combo animation spritesheets — 6 frames each, play once during dash
+    this.load.spritesheet('combo_lateral_anim', `/sprites/fighter/combo_lateral.png?v=cl1`,  { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('combo_down_anim',    `/sprites/fighter/combo_down_anim.png?v=cl1`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('combo_up_anim',      `/sprites/fighter/combo_up_anim.png?v=cl1`,   { frameWidth: 256, frameHeight: 256 });
 
     // Combo sprites — single-frame 256×256 images
-    const vc = '?v=combo';
+    const vc = '?v=combo2';
+    this.load.image('combo_lateral',    `/sprites/fighter/combo/combo_lateral.png${vc}`);
     this.load.image('combo_dash',       `/sprites/fighter/combo/combo_dash.png${vc}`);
     this.load.image('combo_up',         `/sprites/fighter/combo/combo_up.png${vc}`);
     this.load.image('combo_up_left',    `/sprites/fighter/combo/combo_up_left.png${vc}`);
@@ -279,6 +299,29 @@ export abstract class BaseScene extends Phaser.Scene {
 
   protected isRight(): boolean {
     return this.cursors.right.isDown || this.wasd.right.isDown || touchInput.right;
+  }
+
+  protected isAttackHeld(): boolean {
+    return this.wasd.attack.isDown || this.wasd.attack2.isDown || touchInput.attackHeld;
+  }
+
+  protected isArcherAimHeld(): boolean {
+    return this.wasd.attack.isDown || this.wasd.attack2.isDown || touchInput.archerAimHeld;
+  }
+
+  protected getArcherAimDir(facing: 'left' | 'right'): { dx: number; dy: number } {
+    // Touch joystick takes priority
+    if (Math.abs(touchInput.archerAimX) > 0.1 || Math.abs(touchInput.archerAimY) > 0.1) {
+      const dx = touchInput.archerAimX > 0.3 ? 1 : touchInput.archerAimX < -0.3 ? -1 : 0;
+      const dy = touchInput.archerAimY > 0.3 ? 1 : touchInput.archerAimY < -0.3 ? -1 : 0;
+      if (dx !== 0 || dy !== 0) return { dx, dy };
+    }
+    // Keyboard: arrow keys for aim direction
+    const dx = this.cursors.right.isDown ? 1 : this.cursors.left.isDown ? -1 : 0;
+    const dy = this.cursors.down.isDown  ? 1 : this.cursors.up.isDown   ? -1 : 0;
+    if (dx !== 0 || dy !== 0) return { dx, dy };
+    // Default: facing direction
+    return { dx: facing === 'right' ? 1 : -1, dy: 0 };
   }
 
   protected isAttack(): boolean {

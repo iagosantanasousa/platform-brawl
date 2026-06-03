@@ -53,6 +53,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   comboDashVy = 0;
   comboCooldown = 0;
   private comboDashTimer = 0;
+  private comboDashIsLateral = false;
+  private attackSequence = 0; // alternates 0→1→0 to pick attack1/attack2
+
+  // Archer aim
+  archerAiming = false;
+  archerAimDx  = 1;
+  archerAimDy  = 0;
+  private archerAimGfx: Phaser.GameObjects.Graphics | null = null;
 
   // Wall slide / wall jump
   isWallSliding = false;
@@ -66,6 +74,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   slideCooldown = 0;
 
   protected usesSprite = false;
+  protected animPrefix = 'fighter'; // 'fighter' | 'archer'
 
   private wasGrounded = false;
   private wasWallSliding = false;
@@ -85,12 +94,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   ) {
     const cfg = CHARACTER_CONFIGS[characterType];
 
-    // All character types share the same sprite sheet (fighter assets).
-    const hasFighterSprite = scene.textures.exists('fighter_idle');
+    const spritePrefix = characterType === 'archer' ? 'archer' : 'fighter';
+    const hasSprite = scene.textures.exists(`${spritePrefix}_idle`);
     let texKey: string;
 
-    if (hasFighterSprite) {
-      texKey = 'fighter_idle';
+    if (hasSprite) {
+      texKey = `${spritePrefix}_idle`;
     } else {
       texKey = `char_${characterType}`;
       if (!scene.textures.exists(texKey)) {
@@ -107,7 +116,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     super(scene, x, y, texKey);
     scene.add.existing(this);
 
-    if (hasFighterSprite) this.setScale(0.5);
+    if (hasSprite) this.setScale(0.5);
 
     scene.physics.add.existing(this);
 
@@ -115,19 +124,20 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.hp = cfg.hp;
     this.maxHp = cfg.hp;
     this.isLocal = isLocal;
-    this.usesSprite = hasFighterSprite;
+    this.usesSprite  = hasSprite;
+    this.animPrefix  = spritePrefix;
 
     const body = this.body as Phaser.Physics.Arcade.Body;
     // Phaser scales sourceWidth/Height by scaleX/Y: body.width = sourceWidth * scaleX.
     // To get cfg.width world pixels, pass cfg.width / scaleX as the source size.
-    const sx = hasFighterSprite ? 0.5 : 1;
+    const sx = hasSprite ? 0.5 : 1;
     body.setSize(cfg.width / sx, cfg.height / sx);
     body.setCollideWorldBounds(false);
 
-    if (hasFighterSprite) {
+    if (hasSprite) {
       body.setOffset(F_BODY_OX, F_BODY_OY);
       Player.setupFighterAnims(scene);
-      this.playFighter('fighter_idle');
+      this.playAnim(`${spritePrefix}_idle`);
     }
 
     // HP bar
@@ -154,51 +164,67 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (scene.anims.exists('fighter_idle')) return;
 
     const a = scene.anims;
-    // Idle   – 4 frames  (1024 / 256)
-    a.create({ key: 'fighter_idle',   frames: a.generateFrameNumbers('fighter_idle',   { start: 0, end: 3  }), frameRate: 8,  repeat: -1 });
-    // Run    – 10 frames (2560 / 256)
-    a.create({ key: 'fighter_run',    frames: a.generateFrameNumbers('fighter_run',    { start: 0, end: 9  }), frameRate: 14, repeat: -1 });
-    // Jump   – 6 frames  (1536 / 256) – play once, hold last frame
-    a.create({ key: 'fighter_jump',   frames: a.generateFrameNumbers('fighter_jump',   { start: 0, end: 5  }), frameRate: 10, repeat: 0  });
-    // Fall   – 4 frames  (1024 / 256) – loop
-    a.create({ key: 'fighter_fall',   frames: a.generateFrameNumbers('fighter_fall',   { start: 0, end: 3  }), frameRate: 8,  repeat: -1 });
-    // Attack – 3 frames  (768 / 256)  – play once
-    a.create({ key: 'fighter_attack', frames: a.generateFrameNumbers('fighter_attack', { start: 0, end: 2  }), frameRate: 15, repeat: 0  });
-    // Hurt   – 6 frames  (1536 / 256) – play once
-    a.create({ key: 'fighter_hurt',       frames: a.generateFrameNumbers('fighter_hurt',       { start: 0, end: 5  }), frameRate: 12, repeat: 0  });
-    // Death  – 23 frames (5888 / 256) – play once
-    a.create({ key: 'fighter_death',      frames: a.generateFrameNumbers('fighter_death',      { start: 0, end: 22 }), frameRate: 10, repeat: 0  });
-    // Wall slide – 4 frames – loop
-    a.create({ key: 'fighter_wall_slide', frames: a.generateFrameNumbers('fighter_wall_slide', { start: 0, end: 3  }), frameRate: 8,  repeat: -1 });
-    // Wall jump  – 4 frames – play once
-    a.create({ key: 'fighter_wall_jump',  frames: a.generateFrameNumbers('fighter_wall_jump',  { start: 0, end: 3  }), frameRate: 12, repeat: 0  });
-    // Ground slide – 8 frames – play once (matches 320 ms slide duration)
-    a.create({ key: 'fighter_slide',      frames: a.generateFrameNumbers('fighter_slide',      { start: 0, end: 7  }), frameRate: 25, repeat: 0  });
+
+    function def(pfx: string) {
+      a.create({ key: `${pfx}_idle`,       frames: a.generateFrameNumbers(`${pfx}_idle`,       { start: 0, end: 3  }), frameRate: 8,  repeat: -1 });
+      a.create({ key: `${pfx}_run`,        frames: a.generateFrameNumbers(`${pfx}_run`,        { start: 0, end: 9  }), frameRate: 14, repeat: -1 });
+      a.create({ key: `${pfx}_jump`,       frames: a.generateFrameNumbers(`${pfx}_jump`,       { start: 0, end: 5  }), frameRate: 10, repeat: 0  });
+      a.create({ key: `${pfx}_fall`,       frames: a.generateFrameNumbers(`${pfx}_fall`,       { start: 0, end: 3  }), frameRate: 8,  repeat: -1 });
+      a.create({ key: `${pfx}_attack`,     frames: a.generateFrameNumbers(`${pfx}_attack`,     { start: 0, end: 2  }), frameRate: 15, repeat: 0  });
+      a.create({ key: `${pfx}_attack2`,    frames: a.generateFrameNumbers(`${pfx}_attack2`,    { start: 0, end: 3  }), frameRate: 15, repeat: 0  });
+      a.create({ key: `${pfx}_hurt`,       frames: a.generateFrameNumbers(`${pfx}_hurt`,       { start: 0, end: 5  }), frameRate: 12, repeat: 0  });
+      a.create({ key: `${pfx}_death`,      frames: a.generateFrameNumbers(`${pfx}_death`,      { start: 0, end: 22 }), frameRate: 10, repeat: 0  });
+      a.create({ key: `${pfx}_wall_slide`, frames: a.generateFrameNumbers(`${pfx}_wall_slide`, { start: 0, end: 3  }), frameRate: 8,  repeat: -1 });
+      a.create({ key: `${pfx}_wall_jump`,  frames: a.generateFrameNumbers(`${pfx}_wall_jump`,  { start: 0, end: 3  }), frameRate: 12, repeat: 0  });
+      a.create({ key: `${pfx}_slide`,      frames: a.generateFrameNumbers(`${pfx}_slide`,      { start: 0, end: 7  }), frameRate: 25, repeat: 0  });
+    }
+
+    def('fighter');
+    // Fighter attack1 has 4 frames — override the 3-frame default from def()
+    a.remove('fighter_attack');
+    a.create({ key: 'fighter_attack', frames: a.generateFrameNumbers('fighter_attack', { start: 0, end: 3 }), frameRate: 15, repeat: 0 });
+
+    def('archer');
+
+    // Combo animations – 6 frames each – play once over 300 ms (20 fps)
+    a.create({ key: 'combo_lateral_anim', frames: a.generateFrameNumbers('combo_lateral_anim', { start: 0, end: 5 }), frameRate: 20, repeat: 0 });
+    a.create({ key: 'combo_down_anim',    frames: a.generateFrameNumbers('combo_down_anim',    { start: 0, end: 5 }), frameRate: 20, repeat: 0 });
+    a.create({ key: 'combo_up_anim',      frames: a.generateFrameNumbers('combo_up_anim',      { start: 0, end: 5 }), frameRate: 20, repeat: 0 });
   }
 
   // ─── Animation helper ────────────────────────────────────────────────────────
 
-  // Plays a fighter animation. Frames are pre-scaled to 128×88 — no runtime scale needed.
-  protected playFighter(key: string, ignoreIfPlaying = false) {
+  protected playAnim(key: string, ignoreIfPlaying = false) {
     this.play(key, ignoreIfPlaying);
+  }
+
+  // Shorthand: plays prefixed animation (e.g. 'idle' → 'fighter_idle' or 'archer_idle')
+  protected playFighter(key: string, ignoreIfPlaying = false) {
+    // Accept both full keys ('fighter_idle') and short keys ('idle')
+    const fullKey = key.startsWith(this.animPrefix) ? key : `${this.animPrefix}_${key}`;
+    this.play(fullKey, ignoreIfPlaying);
   }
 
   // ─── Public animation triggers ───────────────────────────────────────────────
 
-  triggerAttackAnim() {
-    if (this.usesSprite) this.playFighter('fighter_attack');
+  // Returns the cooldown multiplier: 0.5 after attack1 (quick combo window), 1 after attack2.
+  triggerAttackAnim(): number {
+    const isFirst = this.attackSequence === 0;
+    this.attackSequence = isFirst ? 1 : 0;
+    if (this.usesSprite) this.playFighter(isFirst ? 'attack' : 'attack2');
+    return isFirst ? 0.5 : 1;
   }
 
   triggerDeathAnim() {
-    if (this.usesSprite) this.playFighter('fighter_death');
+    if (this.usesSprite) this.playFighter('death');
   }
 
   triggerWallJumpAnim() {
-    if (this.usesSprite) this.playFighter('fighter_wall_jump');
+    if (this.usesSprite) this.playFighter('wall_jump');
   }
 
   triggerSlideAnim() {
-    if (this.usesSprite) this.playFighter('fighter_slide');
+    if (this.usesSprite) this.playFighter('slide');
   }
 
   // ─── HP bar ──────────────────────────────────────────────────────────────────
@@ -348,6 +374,18 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     return dx >= 0 ? 'combo_right' : 'combo_left';
   }
 
+  // Maps dash direction to animation key.
+  // Diagonals: down-diagonals → combo_lateral_anim (combo.png), up-diagonals → combo_up_anim.
+  // flipX is set separately based on comboDashVx.
+  private static comboDashAnimKey(dx: number, dy: number): string {
+    if (dy < 0) return 'combo_up_anim';      // up, up-left, up-right
+    if (dy > 0) {
+      if (dx === 0) return 'combo_down_anim'; // straight down
+      return 'combo_lateral_anim';            // down-left, down-right → combo.png
+    }
+    return 'combo_lateral_anim';              // left, right
+  }
+
   private updateFighterAnim() {
     // ── Combo overrides ──────────────────────────────────────────────────────
     if (this.comboState === 'aiming') {
@@ -357,33 +395,35 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       return;
     }
     if (this.comboState === 'dashing') {
-      if (this.texture.key !== 'combo_dash') { this.anims.stop(); this.setTexture('combo_dash'); }
       this.setFlipX(this.comboDashVx < 0);
+      const animKey = Player.comboDashAnimKey(this.comboAimDx, this.comboAimDy);
+      if (this.anims.currentAnim?.key !== animKey) this.play(animKey);
       return;
     }
 
     // ── Normal animation ─────────────────────────────────────────────────────
     const body   = this.body as Phaser.Physics.Arcade.Body;
     const curKey = this.anims.currentAnim?.key ?? '';
+    const pfx    = this.animPrefix;
 
     // One-shots: never interrupt while playing
-    const oneShots = ['fighter_hurt', 'fighter_attack', 'fighter_death', 'fighter_wall_jump', 'fighter_slide'];
+    const oneShots = [`${pfx}_hurt`, `${pfx}_attack`, `${pfx}_attack2`, `${pfx}_death`, `${pfx}_wall_jump`, `${pfx}_slide`];
     if (oneShots.includes(curKey) && this.anims.isPlaying) return;
 
-    // Restore fighter texture if we were showing a combo image
-    if (!curKey || !curKey.startsWith('fighter_')) this.setTexture('fighter_idle');
+    // Restore base texture if we were showing a combo static image
+    if (!curKey || !curKey.startsWith(pfx)) this.setTexture(`${pfx}_idle`);
 
     // Ground slide
     if (this.isSliding) {
       this.setFlipX(this.facing === 'left');
-      this.playFighter('fighter_slide', true);
+      this.playFighter('slide', true);
       return;
     }
 
     // Wall slide — face away from the wall
     if (this.isWallSliding) {
       this.setFlipX(this.wallSide === 'right');
-      this.playFighter('fighter_wall_slide', true);
+      this.playFighter('wall_slide', true);
       return;
     }
 
@@ -394,14 +434,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     if (!this.isGrounded) {
       if (vy < 0) {
-        if (curKey !== 'fighter_jump' && curKey !== 'fighter_wall_jump') this.playFighter('fighter_jump');
+        if (curKey !== `${pfx}_jump` && curKey !== `${pfx}_wall_jump`) this.playFighter('jump');
       } else {
-        this.playFighter('fighter_fall', true);
+        this.playFighter('fall', true);
       }
     } else if (vx > 25) {
-      this.playFighter('fighter_run', true);
+      this.playFighter('run', true);
     } else {
-      this.playFighter('fighter_idle', true);
+      this.playFighter('idle', true);
     }
   }
 
@@ -423,6 +463,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   executeCombo() {
     if (this.comboState !== 'aiming') return;
     this.comboState = 'dashing';
+    this.comboDashIsLateral = this.comboAimDy === 0;
 
     // Normalise direction vector so diagonal speed equals axis-aligned speed
     const len = Math.sqrt(this.comboAimDx * this.comboAimDx + this.comboAimDy * this.comboAimDy) || 1;
@@ -443,9 +484,62 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     body.setAllowGravity(true);
   }
 
+  // ─── Archer aim ──────────────────────────────────────────────────────────────
+
+  startArcherAim(facingRight: boolean) {
+    this.archerAiming = true;
+    this.archerAimDx  = facingRight ? 1 : -1;
+    this.archerAimDy  = 0;
+    if (!this.archerAimGfx) {
+      this.archerAimGfx = this.scene.add.graphics().setDepth(20);
+    }
+  }
+
+  updateArcherAim(dx: number, dy: number) {
+    if (!this.archerAiming) return;
+    this.archerAimDx = dx;
+    this.archerAimDy = dy;
+    this.drawAimIndicator();
+  }
+
+  cancelArcherAim() {
+    this.archerAiming = false;
+    this.archerAimGfx?.clear();
+  }
+
+  private drawAimIndicator() {
+    const gfx = this.archerAimGfx;
+    if (!gfx) return;
+    gfx.clear();
+
+    const len = Math.sqrt(this.archerAimDx ** 2 + this.archerAimDy ** 2) || 1;
+    const nx = this.archerAimDx / len;
+    const ny = this.archerAimDy / len;
+    const lineLen = 40;
+
+    gfx.lineStyle(2, 0xffdd88, 0.9);
+    gfx.beginPath();
+    gfx.moveTo(this.x, this.y - 10);
+    gfx.lineTo(this.x + nx * lineLen, this.y - 10 + ny * lineLen);
+    gfx.strokePath();
+
+    // Arrowhead
+    const angle = Math.atan2(ny, nx);
+    const tipX = this.x + nx * lineLen;
+    const tipY = this.y - 10 + ny * lineLen;
+    const spread = 0.4;
+    gfx.fillStyle(0xffdd88, 0.9);
+    gfx.fillTriangle(
+      tipX, tipY,
+      tipX - Math.cos(angle - spread) * 8, tipY - Math.sin(angle - spread) * 8,
+      tipX - Math.cos(angle + spread) * 8, tipY - Math.sin(angle + spread) * 8,
+    );
+  }
+
   // ─── Cleanup ─────────────────────────────────────────────────────────────────
 
   destroy(fromScene?: boolean) {
+    this.archerAimGfx?.destroy();
     this.hpBar?.destroy();
     this.nameLabel?.destroy();
     super.destroy(fromScene);
