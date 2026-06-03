@@ -39,7 +39,7 @@ export interface RemoteBattleState {
   projectiles: { forEach: (cb: (v: RemoteProjectileState, k: string) => void) => void };
 }
 
-const RAW_URL = (import.meta as any).env?.VITE_SERVER_URL ?? 'ws://localhost:4000';
+const RAW_URL = (import.meta as any).env?.VITE_SERVER_URL ?? 'wss://platform-brawl-server.onrender.com';
 const HTTP_URL = RAW_URL.replace(/^ws(s?)/, 'http$1');
 
 class ColyseusClientWrapper {

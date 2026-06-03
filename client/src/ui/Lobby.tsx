@@ -20,6 +20,7 @@ export default function Lobby({ onStart }: Props) {
   const [createdRoomId, setCreatedRoomId] = useState('');
   const [error, setError] = useState('');
   const [waiting, setWaiting] = useState(false);
+  const [warmingUp, setWarmingUp] = useState(false);
 
   // Track character + mapId for the create-room callback
   const characterRef = useRef(character);
@@ -33,16 +34,32 @@ export default function Lobby({ onStart }: Props) {
     onStart({ characterType: character, mapId, mode: 'training', platform });
   }
 
+  function withTimeout<T>(promise: Promise<T>, ms: number, msg: string): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(msg)), ms),
+      ),
+    ]);
+  }
+
   async function handleCreateRoom() {
     setError('');
     setWaiting(true);
+    setWarmingUp(false);
+    const warmTimer = setTimeout(() => setWarmingUp(true), 4000);
     try {
-      const room = await colyseusClient.createRoom(characterRef.current, mapIdRef.current);
+      const room = await withTimeout(
+        colyseusClient.createRoom(characterRef.current, mapIdRef.current),
+        35000,
+        'Servidor demorou demais para responder. Tente novamente.',
+      );
+      clearTimeout(warmTimer);
       setCreatedRoomId(room.roomId);
       setWaiting(false);
+      setWarmingUp(false);
       setStep('create-room');
 
-      // Navigate to game once server starts the battle
       room.onStateChange((state) => {
         if (state.phase === 'countdown' || state.phase === 'battle') {
           onStart({
@@ -55,8 +72,11 @@ export default function Lobby({ onStart }: Props) {
         }
       });
     } catch (e: any) {
+      clearTimeout(warmTimer);
       setError(e?.message ?? 'Erro ao criar sala.');
       setWaiting(false);
+      setWarmingUp(false);
+      colyseusClient.leave();
     }
   }
 
@@ -64,11 +84,16 @@ export default function Lobby({ onStart }: Props) {
     if (!roomInput.trim()) return;
     setError('');
     setWaiting(true);
+    setWarmingUp(false);
+    const warmTimer = setTimeout(() => setWarmingUp(true), 4000);
     try {
-      const room = await colyseusClient.joinRoom(
-        roomInput.trim().toUpperCase(),
-        characterRef.current,
+      const room = await withTimeout(
+        colyseusClient.joinRoom(roomInput.trim().toUpperCase(), characterRef.current),
+        35000,
+        'Servidor demorou demais para responder. Tente novamente.',
       );
+      clearTimeout(warmTimer);
+      setWarmingUp(false);
       onStart({
         characterType: characterRef.current,
         mapId: room.state.mapId as MapId,
@@ -77,8 +102,11 @@ export default function Lobby({ onStart }: Props) {
         roomId: room.roomId,
       });
     } catch (e: any) {
+      clearTimeout(warmTimer);
       setError(e?.message ?? 'Sala não encontrada ou cheia.');
       setWaiting(false);
+      setWarmingUp(false);
+      colyseusClient.leave();
     }
   }
 
@@ -163,7 +191,7 @@ export default function Lobby({ onStart }: Props) {
             disabled={!roomInput.trim() || waiting}
             className="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {waiting ? 'Entrando...' : 'Entrar'}
+            {waiting ? (warmingUp ? '⏳ Acordando...' : 'Entrando...') : 'Entrar'}
           </button>
         </div>
       </div>
@@ -247,7 +275,7 @@ export default function Lobby({ onStart }: Props) {
               disabled={waiting}
               className="w-full py-4 bg-blue-700 text-white font-black text-lg rounded-xl hover:bg-blue-600 transition disabled:opacity-50"
             >
-              CRIAR SALA
+              {waiting ? (warmingUp ? '⏳ Acordando servidor...' : 'Conectando...') : 'CRIAR SALA'}
             </button>
             <button
               onClick={() => setStep('join-room')}
