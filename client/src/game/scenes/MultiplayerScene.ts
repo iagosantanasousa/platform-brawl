@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { SnapshotInterpolation } from '@geckos.io/snapshot-interpolation';
 import type { GameConfig } from '../../App';
 import { BaseScene } from './BaseScene';
 import { Player } from '../entities/Player';
@@ -6,8 +7,8 @@ import { CHARACTER_CONFIGS, MAP_CONFIGS } from 'shared';
 import type { CharacterType } from 'shared';
 import { touchInput } from '../touchInput';
 
-const LERP_FACTOR   = 0.25; // remote player position smoothing
-const INPUT_RATE_MS = 50;   // send rate to server (ms)
+const SERVER_FPS    = 50;  // server tick rate
+const INPUT_RATE_MS = 50;  // send rate to server (ms)
 
 interface RemoteState {
   x: number;
@@ -36,9 +37,9 @@ export class MultiplayerScene extends BaseScene {
   private phaseOverlay?: Phaser.GameObjects.Rectangle;
   private phaseLabel?: Phaser.GameObjects.Text;
 
-  // Remote player lerp targets
-  private remoteTargetX = 0;
-  private remoteTargetY = 0;
+  // Snapshot interpolation for remote player
+  private SI!: SnapshotInterpolation;
+  private remoteId = 'remote'; // constant id used in snapshots
   private remoteState?: RemoteState;
   private remoteAnimPrefix = 'fighter';
   private remoteCurrentAnim = '';
@@ -78,6 +79,8 @@ export class MultiplayerScene extends BaseScene {
 
     const room = this.config.multiplayerRoom!;
     this.localSessionId = room.sessionId;
+
+    this.SI = new SnapshotInterpolation(SERVER_FPS);
 
     // Set up remote sprite (created lazily when remote player appears)
     this.setupHUD(map.width, map.height);
@@ -146,10 +149,16 @@ export class MultiplayerScene extends BaseScene {
       }
     }
 
-    // ── Remote player lerp — ALWAYS runs, no phase gate ──────────────────────
+    // ── Remote player — snapshot interpolation (smooth, no jumps) ────────────
     if (this.remoteSprite && this.remoteState) {
-      this.remoteSprite.x = Phaser.Math.Linear(this.remoteSprite.x, this.remoteTargetX, LERP_FACTOR);
-      this.remoteSprite.y = Phaser.Math.Linear(this.remoteSprite.y, this.remoteTargetY, LERP_FACTOR);
+      const snap = this.SI.calcInterpolation('x y');
+      if (snap) {
+        const s = (snap.state as any[]).find((e: any) => e.id === this.remoteId);
+        if (s) {
+          this.remoteSprite.x = s.x;
+          this.remoteSprite.y = s.y;
+        }
+      }
       this.updateRemoteAnim(this.remoteState);
       this.updateRemoteHpBar();
     }
@@ -173,9 +182,7 @@ export class MultiplayerScene extends BaseScene {
         }
         this.updateLocalHud(p.hp, p.maxHp);
       } else {
-        // Remote player
-        this.remoteTargetX = p.x;
-        this.remoteTargetY = p.y;
+        // Remote player — add snapshot for smooth interpolation
         this.remoteState = {
           x: p.x, y: p.y,
           velocityX: p.velocityX, velocityY: p.velocityY,
@@ -184,6 +191,13 @@ export class MultiplayerScene extends BaseScene {
           characterType: p.characterType as CharacterType,
           team: p.team ?? '',
         };
+
+        const snapshot = this.SI.snapshot.create([{
+          id: this.remoteId, x: p.x, y: p.y,
+          velocityX: p.velocityX, velocityY: p.velocityY,
+        }]);
+        this.SI.vault.add(snapshot);
+
         this.ensureRemoteSprite(p.characterType as CharacterType);
         this.updateRemoteHpLabel(p.hp, p.maxHp, p.team);
 
@@ -207,7 +221,7 @@ export class MultiplayerScene extends BaseScene {
     const prefix = this.getSpritePrefix(characterType);
     this.remoteAnimPrefix = prefix;
 
-    const pos = this.remoteState ?? { x: this.remoteTargetX, y: this.remoteTargetY };
+    const pos = this.remoteState ?? { x: 0, y: 0 };
 
     this.remoteSprite = this.add.sprite(pos.x, pos.y, `${prefix}_idle`)
       .setScale(0.5)

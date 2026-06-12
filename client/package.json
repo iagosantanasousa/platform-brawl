@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@geckos.io/snapshot-interpolation": "^1.1.1",
     "colyseus.js": "0.16.22",
     "phaser": "^3.87.0",
     "react": "^18.3.1",
