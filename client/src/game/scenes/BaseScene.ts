@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { MapId, PlatformDef } from 'shared';
+import type { PlatformDef } from 'shared';
 import { MAP_CONFIGS } from 'shared';
 import type { GameConfig } from '../../App';
 import { touchInput } from '../touchInput';
@@ -63,8 +63,9 @@ export abstract class BaseScene extends Phaser.Scene {
     this.load.spritesheet('fighter_run',        `/sprites/fighter/run.png${v}`,        { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_jump',       `/sprites/fighter/jump.png${v}`,       { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_fall',       `/sprites/fighter/fall.png${v}`,       { frameWidth: 256, frameHeight: 256 });
-    this.load.spritesheet('fighter_attack',      `/sprites/fighter/attack.png${v}`,      { frameWidth: 256, frameHeight: 256 });
-    this.load.spritesheet('fighter_attack2',     `/sprites/fighter/attack2.png${v}`,     { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('fighter_attack',  `/sprites/fighter/attack.png${v}`,  { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('fighter_attack2', `/sprites/fighter/attack2.png${v}`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('fighter_attack3', `/sprites/fighter/attack3.png${v}`, { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_hurt',       `/sprites/fighter/hurt.png${v}`,       { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_death',      `/sprites/fighter/death.png${v}`,      { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('fighter_wall_slide', `/sprites/fighter/wall_slide.png${v}`, { frameWidth: 256, frameHeight: 256 });
@@ -82,6 +83,38 @@ export abstract class BaseScene extends Phaser.Scene {
     this.load.spritesheet('archer_wall_slide', `/sprites/archer/wall_slide.png${v}`, { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('archer_wall_jump',  `/sprites/archer/wall_jump.png${v}`,  { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('archer_slide',      `/sprites/archer/slide.png${v}`,      { frameWidth: 256, frameHeight: 256 });
+
+    // Archer aim poses — single-frame images (idle + air) and animated spritesheets (run)
+    const va = '?v=aa1';
+    this.load.image('archer_aim_idle_front',           `/sprites/archer/aim/idle_front.png${va}`);
+    this.load.image('archer_aim_idle_down',            `/sprites/archer/aim/idle_down.png${va}`);
+    this.load.image('archer_aim_idle_diag_up',         `/sprites/archer/aim/idle_diag_up.png${va}`);
+    this.load.image('archer_aim_idle_diag_down',       `/sprites/archer/aim/idle_diag_down.png${va}`);
+    this.load.image('archer_aim_idle_up',              `/sprites/archer/aim/idle_up.png${va}`);
+    this.load.image('archer_aim_air_down',             `/sprites/archer/aim/air_down.png${va}`);
+    this.load.image('archer_aim_air_front',            `/sprites/archer/aim/air_front.png${va}`);
+    this.load.image('archer_aim_air_diag_down',        `/sprites/archer/aim/air_diag_down.png${va}`);
+    this.load.image('archer_aim_air_diag_up',          `/sprites/archer/aim/air_diag_up.png${va}`);
+    this.load.image('archer_aim_air_up',               `/sprites/archer/aim/air_up.png${va}`);
+    this.load.spritesheet('archer_aim_run_front',          `/sprites/archer/aim/run_front.png${va}`,          { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_aim_run_diag_up',        `/sprites/archer/aim/run_diag_up.png${va}`,        { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_aim_run_diag_down',      `/sprites/archer/aim/run_diag_down.png${va}`,      { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_aim_run_up',             `/sprites/archer/aim/run_up.png${va}`,             { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_aim_run_back',           `/sprites/archer/aim/run_back.png${va}`,           { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_aim_run_back_diag_up',   `/sprites/archer/aim/run_back_diag_up.png${va}`,   { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('archer_aim_run_back_diag_down', `/sprites/archer/aim/run_back_diag_down.png${va}`, { frameWidth: 256, frameHeight: 256 });
+
+    // Warrior (Tank) sprites
+    this.load.spritesheet('warrior_idle',  `/sprites/warrior/idle.png${v}`,  { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_run',   `/sprites/warrior/run.png${v}`,   { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_fall',  `/sprites/warrior/fall.png${v}`,  { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_jump',  `/sprites/warrior/jump.png${v}`,  { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_attack',  `/sprites/warrior/attack.png${v}`,  { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_attack2', `/sprites/warrior/attack2.png${v}`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_attack3', `/sprites/warrior/attack3.png${v}`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_slide',      `/sprites/warrior/slide.png${v}`,      { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_wall_slide', `/sprites/warrior/wall_slide.png${v}`, { frameWidth: 256, frameHeight: 256 });
+    this.load.spritesheet('warrior_wall_jump',  `/sprites/warrior/wall_jump.png${v}`,  { frameWidth: 256, frameHeight: 256 });
 
     // Combo animation spritesheets — 6 frames each, play once during dash
     this.load.spritesheet('combo_lateral_anim', `/sprites/fighter/combo_lateral.png?v=cl1`,  { frameWidth: 256, frameHeight: 256 });
@@ -196,28 +229,49 @@ export abstract class BaseScene extends Phaser.Scene {
         { key: 'bush4',  x: 76,  y: 224 },   // left high platform
         { key: 'bush7',  x: 852, y: 224 },   // right high platform
       ],
-      corridors: [
-        // Willow trees on ground
-        { key: 'willow1', x: 160, y: groundY },
-        { key: 'willow2', x: 800, y: groundY },
-        { key: 'willow3', x: 480, y: 384 },  // on top of center pillar
-        // Dry trees on ground
-        { key: 'drytree3', x: 210, y: groundY },
-        { key: 'drytree1', x: 750, y: groundY },
-        // Rocks/bushes on ground
-        { key: 'bush8',  x: 80,  y: groundY },
-        { key: 'bush5',  x: 340, y: groundY },
-        { key: 'bush9',  x: 620, y: groundY },
-        { key: 'bush3',  x: 900, y: groundY },
-        // Rocks/bushes on platforms
-        { key: 'bush1',  x: 100, y: 320 },   // mid-level left
-        { key: 'bush2',  x: 780, y: 320 },   // mid-level right
-        { key: 'bush6',  x: 444, y: 384 },   // top of center pillar
-        { key: 'bush4',  x: 50,  y: 192 },   // upper left
-        { key: 'bush7',  x: 840, y: 192 },   // upper right
-        { key: 'bush4',  x: 316, y: 240 },   // upper center left platform
-        { key: 'bush2',  x: 600, y: 240 },   // upper center right platform
-        { key: 'bush1',  x: 480, y: 144 },   // top center bridge
+      coliseum: [
+        // Ground — left zone
+        { key: 'willow1',  x: 200,  y: groundY },
+        { key: 'drytree2', x: 400,  y: groundY },
+        { key: 'willow2',  x: 600,  y: groundY },
+        { key: 'bush5',    x: 100,  y: groundY },
+        { key: 'bush8',    x: 500,  y: groundY },
+        // Ground — center-left
+        { key: 'drytree1', x: 1080, y: groundY },
+        { key: 'bush3',    x: 1400, y: groundY },
+        { key: 'bush9',    x: 1700, y: groundY },
+        // Ground — center (under top bridge)
+        { key: 'drytree3', x: 1920, y: groundY },
+        // Ground — center-right
+        { key: 'bush6',    x: 2140, y: groundY },
+        { key: 'bush2',    x: 2440, y: groundY },
+        { key: 'drytree2', x: 2760, y: groundY },
+        // Ground — right zone
+        { key: 'willow3',  x: 3240, y: groundY },
+        { key: 'drytree1', x: 3440, y: groundY },
+        { key: 'willow1',  x: 3640, y: groundY },
+        { key: 'bush4',    x: 3340, y: groundY },
+        { key: 'bush7',    x: 3740, y: groundY },
+        // Platforms — left zone
+        { key: 'bush1', x: 144,  y: 224 }, // left high
+        { key: 'bush2', x: 192,  y: 384 }, // left mid
+        { key: 'bush6', x: 448,  y: 288 }, // left-center
+        { key: 'bush4', x: 736,  y: 224 }, // left approach bridge
+        // Platforms — center-left
+        { key: 'bush9', x: 1088, y: 288 }, // center-left mid
+        { key: 'bush3', x: 1280, y: 160 }, // center-left high
+        // Top center bridge
+        { key: 'willow3', x: 1920, y: 128 },
+        { key: 'bush5',   x: 1760, y: 128 },
+        { key: 'bush7',   x: 2080, y: 128 },
+        // Platforms — center-right
+        { key: 'bush8', x: 2560, y: 160 }, // center-right high
+        { key: 'bush1', x: 2752, y: 288 }, // center-right mid
+        // Platforms — right zone
+        { key: 'bush3', x: 3104, y: 224 }, // right approach bridge
+        { key: 'bush5', x: 3392, y: 288 }, // right-center
+        { key: 'bush6', x: 3648, y: 384 }, // right mid
+        { key: 'bush2', x: 3696, y: 224 }, // right high
       ],
     };
 
