@@ -14,6 +14,7 @@ export class PlayerSchema extends Schema {
   jumpsUsed      = 0;   // server-only
   attackCooldown = 0;   // server-only (ms remaining)
   @type('boolean') isDead        = false;
+  @type('uint8')   attackCount   = 0;   // increments each attack — client detects change to play anim
   knockbackX     = 0;   // server-only
   @type('string')  team          = '';    // 'A' | 'B' | ''
   @type('boolean') isReady       = false;

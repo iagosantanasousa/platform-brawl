@@ -71,6 +71,7 @@ export function applyInput(state: BattleRoomState, playerId: string, input: Play
 
   if (input.attack && player.attackCooldown <= 0) {
     player.attackCooldown = cfg.attackCooldown;
+    player.attackCount    = (player.attackCount + 1) % 256;
     resolveAttack(state, player);
   }
 

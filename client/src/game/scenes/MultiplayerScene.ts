@@ -23,6 +23,7 @@ interface RemoteState {
   isDead: boolean;
   characterType: CharacterType;
   team: string;
+  attackCount: number;
 }
 
 export class MultiplayerScene extends BaseScene {
@@ -48,8 +49,9 @@ export class MultiplayerScene extends BaseScene {
   private SI!: SnapshotInterpolation;
   private remoteId = 'remote'; // constant id used in snapshots
   private remoteState?: RemoteState;
-  private remoteAnimPrefix = 'fighter';
+  private remoteAnimPrefix  = 'fighter';
   private remoteCurrentAnim = '';
+  private remoteAttackCount = 0;
 
   // Input
   private inputTimer   = 0;
@@ -169,12 +171,20 @@ export class MultiplayerScene extends BaseScene {
       if (snap) {
         const s = (snap.state as any[]).find((e: any) => e.id === this.remoteId);
         if (s) {
-          this.remoteSprite.x = s.x;
-          this.remoteSprite.y = s.y;
+          const dx = s.x - this.remoteSprite.x;
+          const dy = s.y - this.remoteSprite.y;
+          // After a DR gap the sprite may be far off; ease back instead of snapping
+          if (Math.abs(dx) > 180 || Math.abs(dy) > 180) {
+            this.remoteSprite.x += dx * 0.2;
+            this.remoteSprite.y += dy * 0.2;
+          } else {
+            this.remoteSprite.x = s.x;
+            this.remoteSprite.y = s.y;
+          }
         }
       } else {
-        // Dead reckoning: extrapolate with gravity matching server (GRAVITY = 900)
-        this.drVelY += 900 * dt;
+        // Dead reckoning: only apply gravity when airborne — grounded players don't fall
+        if (!this.remoteState.isGrounded) this.drVelY += 900 * dt;
         this.remoteSprite.x += this.drVelX * dt;
         this.remoteSprite.y += this.drVelY * dt;
       }
@@ -217,6 +227,7 @@ export class MultiplayerScene extends BaseScene {
           hp: p.hp, maxHp: p.maxHp, isDead: p.isDead,
           characterType: p.characterType as CharacterType,
           team: p.team ?? '',
+          attackCount: p.attackCount ?? 0,
         };
         this.drVelX = p.velocityX;
         this.drVelY = p.velocityY;
@@ -278,24 +289,32 @@ export class MultiplayerScene extends BaseScene {
     const sprite = this.remoteSprite!;
     const prefix = this.remoteAnimPrefix;
 
-    let anim: string;
-    if (state.isDead) {
-      anim = `${prefix}_death`;
-    } else if (!state.isGrounded && state.velocityY < 0) {
-      anim = `${prefix}_jump`;
-    } else if (!state.isGrounded && state.velocityY > 0) {
-      anim = `${prefix}_fall`;
-    } else if (Math.abs(state.velocityX) > 20) {
-      anim = `${prefix}_run`;
-    } else {
-      anim = `${prefix}_idle`;
+    // Detect new attack — play one-shot immediately
+    if (state.attackCount !== this.remoteAttackCount) {
+      this.remoteAttackCount = state.attackCount;
+      const seq = state.attackCount % 3;
+      const key = seq === 0 ? `${prefix}_attack` : seq === 1 ? `${prefix}_attack2` : `${prefix}_attack3`;
+      if (this.anims.exists(key)) {
+        sprite.play(key, false);
+        this.remoteCurrentAnim = key;
+        return;
+      }
     }
+
+    // Don't interrupt a one-shot attack while it plays
+    const attackKeys = [`${prefix}_attack`, `${prefix}_attack2`, `${prefix}_attack3`, `${prefix}_death`];
+    if (attackKeys.includes(this.remoteCurrentAnim) && sprite.anims.isPlaying) return;
+
+    let anim: string;
+    if (state.isDead)                            anim = `${prefix}_death`;
+    else if (!state.isGrounded && state.velocityY < -50) anim = `${prefix}_jump`;
+    else if (!state.isGrounded && state.velocityY > 50)  anim = `${prefix}_fall`;
+    else if (Math.abs(state.velocityX) > 20)             anim = `${prefix}_run`;
+    else                                                  anim = `${prefix}_idle`;
 
     if (anim !== this.remoteCurrentAnim) {
       this.remoteCurrentAnim = anim;
-      if (this.anims.exists(anim)) {
-        sprite.play(anim, true);
-      }
+      if (this.anims.exists(anim)) sprite.play(anim, true);
     }
   }
 
