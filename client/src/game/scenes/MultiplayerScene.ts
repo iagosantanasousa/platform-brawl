@@ -52,9 +52,10 @@ export class MultiplayerScene extends BaseScene {
   private localJumpsUsed = 0;
 
   // Game state
-  private localSessionId = '';
-  private phase = 'waiting';
-  private hasShownFinish = false;
+  private localSessionId    = '';
+  private phase             = 'waiting';
+  private hasShownFinish    = false;
+  private localInitialized  = false; // true after first server sync positions local player
 
   constructor(config: GameConfig, onBack: () => void) {
     super('MultiplayerScene', config, onBack);
@@ -96,23 +97,20 @@ export class MultiplayerScene extends BaseScene {
   }
 
   update(_time: number, delta: number) {
-    if (this.phase !== 'battle') return;
-
     const room = this.config.multiplayerRoom!;
     const cfg  = CHARACTER_CONFIGS[this.config.characterType];
     const body = this.localPlayer.body as Phaser.Physics.Arcade.Body;
 
-    // ── Read input (JustDown consumed once here) ──────────────────────────────
+    // ── Read input ────────────────────────────────────────────────────────────
     const left   = this.isLeft();
     const right  = this.isRight();
-    const jump   = this.isJump();   // JustDown — true only on press frame
-    const attack = this.isAttack(); // JustDown — true only on press frame
+    const jump   = this.isJump();
+    const attack = this.isAttack();
 
-    // Accumulate one-shot inputs between server sends so they're never lost
     if (jump)   this.pendingJump   = true;
     if (attack) this.pendingAttack = true;
 
-    // ── Client-side prediction: move local player immediately ─────────────────
+    // ── Client-side prediction: ALWAYS move local player, no phase gate ───────
     if (left) {
       this.localPlayer.setVelocityX(-cfg.speed);
       this.localPlayer.setFlipX(true);
@@ -129,21 +127,26 @@ export class MultiplayerScene extends BaseScene {
       this.localJumpsUsed++;
     }
 
-    // ── Send input to server at fixed rate ────────────────────────────────────
-    this.inputTimer += delta;
-    if (this.inputTimer >= INPUT_RATE_MS) {
-      this.inputTimer = 0;
-      room.send('input', {
-        left,
-        right,
-        jump:   this.pendingJump,
-        attack: this.pendingAttack,
-      });
-      this.pendingJump   = false;
-      this.pendingAttack = false;
+    // Keep HP bar and name label positioned correctly
+    this.localPlayer.update(delta);
+
+    // ── Send input to server only during battle ───────────────────────────────
+    if (this.phase === 'battle') {
+      this.inputTimer += delta;
+      if (this.inputTimer >= INPUT_RATE_MS) {
+        this.inputTimer = 0;
+        room.send('input', {
+          left,
+          right,
+          jump:   this.pendingJump,
+          attack: this.pendingAttack,
+        });
+        this.pendingJump   = false;
+        this.pendingAttack = false;
+      }
     }
 
-    // ── Remote player lerp ────────────────────────────────────────────────────
+    // ── Remote player lerp — ALWAYS runs, no phase gate ──────────────────────
     if (this.remoteSprite && this.remoteState) {
       this.remoteSprite.x = Phaser.Math.Linear(this.remoteSprite.x, this.remoteTargetX, LERP_FACTOR);
       this.remoteSprite.y = Phaser.Math.Linear(this.remoteSprite.y, this.remoteTargetY, LERP_FACTOR);
@@ -162,7 +165,12 @@ export class MultiplayerScene extends BaseScene {
 
     state.players.forEach((p: any, id: string) => {
       if (id === this.localSessionId) {
-        // Update local HP HUD from server
+        // First sync: snap local player to server spawn position
+        if (!this.localInitialized) {
+          this.localInitialized = true;
+          this.localPlayer.setPosition(p.x, p.y);
+          this.localJumpsUsed = 0;
+        }
         this.updateLocalHud(p.hp, p.maxHp);
       } else {
         // Remote player
