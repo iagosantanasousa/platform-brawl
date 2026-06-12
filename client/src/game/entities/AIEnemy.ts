@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { Player } from './Player';
-import { CHARACTER_CONFIGS } from '../../shared';
+import { CHARACTER_CONFIGS } from 'shared';
 import type { CharacterType } from 'shared';
 
 const RESPAWN_DELAY    = 5000;
