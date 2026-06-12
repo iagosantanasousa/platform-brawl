@@ -1,6 +1,6 @@
 [build]
   base    = "."
-  command = "pnpm install && pnpm --filter client build"
+  command = "pnpm install && pnpm build"
   publish = "dist"
 
 [[redirects]]
