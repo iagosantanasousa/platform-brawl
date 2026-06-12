@@ -5,10 +5,9 @@ import { BaseScene } from './BaseScene';
 import { Player } from '../entities/Player';
 import { CHARACTER_CONFIGS, MAP_CONFIGS } from 'shared';
 import type { CharacterType } from 'shared';
-import { touchInput } from '../touchInput';
 
 const SERVER_FPS             = 50;   // server tick rate
-const INPUT_RATE_MS          = 50;   // send rate to server (ms)
+const INPUT_RATE_MS          = 20;   // send rate to server (ms) — reduced for lower attack latency
 const INTERPOLATION_BUFFER   = 100;  // ms — 5 ticks buffer, enough to survive packet jitter
 
 interface RemoteState {
@@ -54,9 +53,16 @@ export class MultiplayerScene extends BaseScene {
   private remoteAttackCount = 0;
 
   // Input
-  private inputTimer   = 0;
+  private inputTimer    = 0;
   private pendingJump   = false;
   private pendingAttack = false;
+  // Archer aim direction — captured on key release
+  private archerFireDx  = 1;
+  private archerFireDy  = 0;
+  // Combo dash — captured on key release
+  private pendingCombo   = false;
+  private pendingComboDx = 0;
+  private pendingComboDy = 0;
 
   // Local physics prediction
   private localJumpsUsed = 0;
@@ -116,35 +122,81 @@ export class MultiplayerScene extends BaseScene {
     const dt   = delta / 1000;
 
     // ── Read input ────────────────────────────────────────────────────────────
-    const left   = this.isLeft();
-    const right  = this.isRight();
-    const jump   = this.isJump();
-    const attack = this.isAttack();
+    const left        = this.isLeft();
+    const right       = this.isRight();
+    const jump        = this.isJump();
+    const attack      = this.isAttack();
+    const attackHeld  = this.isAttackHeld();
+    const isArcher    = this.config.characterType === 'archer';
 
-    if (jump)   this.pendingJump   = true;
-    if (attack) this.pendingAttack = true;
+    if (jump) this.pendingJump = true;
 
     // ── Client-side prediction ────────────────────────────────────────────────
-    if (left) {
-      this.localPlayer.setVelocityX(-cfg.speed);
-      this.localPlayer.facing = 'left';
-    } else if (right) {
-      this.localPlayer.setVelocityX(cfg.speed);
-      this.localPlayer.facing = 'right';
-    } else {
-      this.localPlayer.setVelocityX(body.velocity.x * 0.7);
-    }
-
     if (body.blocked.down) this.localJumpsUsed = 0;
-    if (jump && this.localJumpsUsed < 2) {
-      this.localPlayer.setVelocityY(cfg.jumpForce);
-      this.localJumpsUsed++;
+
+    // During combo dash Player.update() controls velocity — don't touch it here
+    if (this.localPlayer.comboState !== 'dashing') {
+      if (left) {
+        this.localPlayer.setVelocityX(-cfg.speed);
+        this.localPlayer.facing = 'left';
+      } else if (right) {
+        this.localPlayer.setVelocityX(cfg.speed);
+        this.localPlayer.facing = 'right';
+      } else {
+        this.localPlayer.setVelocityX(body.velocity.x * 0.7);
+      }
+
+      if (jump && this.localJumpsUsed < 2) {
+        this.localPlayer.setVelocityY(cfg.jumpForce);
+        this.localJumpsUsed++;
+      }
     }
 
-    // Trigger attack animation immediately (client-side prediction)
-    if (attack && this.localPlayer.attackCooldown <= 0) {
-      this.localPlayer.triggerAttackAnim();
-      this.localPlayer.attackCooldown = cfg.attackCooldown * 0.5; // half cooldown for combo feel
+    // ── Archer: hold attack key to aim, release to fire ───────────────────────
+    if (isArcher) {
+      if (attackHeld) {
+        if (!this.localPlayer.archerAiming) {
+          this.localPlayer.startArcherAim(this.localPlayer.facing === 'right');
+        }
+        const { dx, dy } = this.getArcherAimDir(this.localPlayer.facing);
+        this.localPlayer.updateArcherAim(dx, dy);
+      } else if (this.localPlayer.archerAiming) {
+        // Key released — capture aim direction and fire
+        this.archerFireDx = this.localPlayer.archerAimDx;
+        this.archerFireDy = this.localPlayer.archerAimDy;
+        this.pendingAttack = true;
+        if (this.localPlayer.attackCooldown <= 0) {
+          this.localPlayer.triggerAttackAnim();
+          this.localPlayer.attackCooldown = cfg.attackCooldown * 0.5;
+        }
+        this.localPlayer.cancelArcherAim();
+      }
+    } else {
+      // Non-archer: tap attack to strike
+      if (attack) this.pendingAttack = true;
+      if (attack && this.localPlayer.attackCooldown <= 0) {
+        this.localPlayer.triggerAttackAnim();
+        this.localPlayer.attackCooldown = cfg.attackCooldown * 0.5;
+      }
+    }
+
+    // ── Combo dash (Q key, aerial, non-archer) ────────────────────────────────
+    if (!isArcher) {
+      const comboHeld = this.isComboHeld();
+      const inAir     = !this.localPlayer.isGrounded;
+
+      if (comboHeld && inAir && this.localPlayer.comboState === 'none' && this.localPlayer.comboCooldown <= 0) {
+        this.localPlayer.startComboAim();
+      } else if (comboHeld && this.localPlayer.comboState === 'aiming') {
+        const { dx, dy } = this.getComboAimDir(this.localPlayer.facing);
+        this.localPlayer.updateComboAim(dx, dy);
+      } else if (!comboHeld && this.localPlayer.comboState === 'aiming') {
+        // Key released — execute dash and queue for server
+        this.pendingComboDx = this.localPlayer.comboAimDx;
+        this.pendingComboDy = this.localPlayer.comboAimDy;
+        this.localPlayer.executeCombo();
+        this.pendingCombo = true;
+      }
     }
 
     // Player entity manages its own animations via updateFighterAnim() inside update()
@@ -157,11 +209,22 @@ export class MultiplayerScene extends BaseScene {
         this.inputTimer = 0;
         room.send('input', {
           left, right,
-          jump:   this.pendingJump,
-          attack: this.pendingAttack,
+          jump:     this.pendingJump,
+          attack:   this.pendingAttack,
+          aimDx:    this.archerFireDx,
+          aimDy:    this.archerFireDy,
+          combo:    this.pendingCombo,
+          comboDx:  this.pendingComboDx,
+          comboDy:  this.pendingComboDy,
         });
-        this.pendingJump   = false;
-        this.pendingAttack = false;
+        this.pendingJump    = false;
+        this.pendingAttack  = false;
+        this.pendingCombo   = false;
+        this.pendingComboDx = 0;
+        this.pendingComboDy = 0;
+        // Reset aim to facing direction after each send
+        this.archerFireDx = this.localPlayer.facing === 'right' ? 1 : -1;
+        this.archerFireDy = 0;
       }
     }
 
@@ -306,11 +369,17 @@ export class MultiplayerScene extends BaseScene {
     if (attackKeys.includes(this.remoteCurrentAnim) && sprite.anims.isPlaying) return;
 
     let anim: string;
-    if (state.isDead)                            anim = `${prefix}_death`;
-    else if (!state.isGrounded && state.velocityY < -50) anim = `${prefix}_jump`;
-    else if (!state.isGrounded && state.velocityY > 50)  anim = `${prefix}_fall`;
-    else if (Math.abs(state.velocityX) > 20)             anim = `${prefix}_run`;
-    else                                                  anim = `${prefix}_idle`;
+    if (state.isDead) {
+      anim = `${prefix}_death`;
+    } else if (!state.isGrounded && state.velocityY < -50) {
+      anim = `${prefix}_jump`;
+    } else if (!state.isGrounded && state.velocityY > 50) {
+      anim = `${prefix}_fall`;
+    } else if (Math.abs(state.velocityX) > 20) {
+      anim = `${prefix}_run`;
+    } else {
+      anim = `${prefix}_idle`;
+    }
 
     if (anim !== this.remoteCurrentAnim) {
       this.remoteCurrentAnim = anim;
@@ -364,7 +433,7 @@ export class MultiplayerScene extends BaseScene {
     }).setOrigin(0.5, 0).setDepth(100).setScrollFactor(0);
 
     this.add.text(w / 2, h - 12,
-      'WASD/Setas: mover  W/↑/Espaço: pular  Z/J: atacar  ESC: sair', {
+      'WASD/Setas: mover  W/↑: pular  Z/J: atacar  Q(ar): combo  ESC: sair', {
         fontSize: '10px', color: '#555577',
       }).setOrigin(0.5, 1).setDepth(100).setScrollFactor(0);
   }

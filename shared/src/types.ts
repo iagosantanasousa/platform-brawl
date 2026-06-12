@@ -14,6 +14,11 @@ export interface PlayerInput {
   right: boolean;
   jump: boolean;
   attack: boolean;
+  aimDx?: number;   // -1 | 0 | 1 — archer fire direction (horizontal)
+  aimDy?: number;   // -1 | 0 | 1 — archer fire direction (vertical)
+  combo?: boolean;  // true when combo dash is released
+  comboDx?: number; // dash direction horizontal (-1 | 0 | 1)
+  comboDy?: number; // dash direction vertical  (-1 | 0 | 1)
 }
 
 export interface PlayerState {

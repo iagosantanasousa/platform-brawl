@@ -16,6 +16,11 @@ export class PlayerSchema extends Schema {
   @type('boolean') isDead        = false;
   @type('uint8')   attackCount   = 0;   // increments each attack — client detects change to play anim
   knockbackX     = 0;   // server-only
+  // Combo dash — server-only (not transmitted)
+  comboDashVx    = 0;
+  comboDashVy    = 0;
+  comboDashTimer = 0;   // ms remaining
+  comboCooldown  = 0;   // ms remaining
   @type('string')  team          = '';    // 'A' | 'B' | ''
   @type('boolean') isReady       = false;
 }

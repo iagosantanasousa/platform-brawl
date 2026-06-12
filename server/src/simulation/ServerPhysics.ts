@@ -4,7 +4,10 @@ import { BattleRoomState } from '../schemas/BattleRoomState';
 import { PlayerSchema } from '../schemas/PlayerSchema';
 import { ProjectileSchema } from '../schemas/ProjectileSchema';
 
-const GRAVITY = 900;
+const GRAVITY             = 900;
+const COMBO_DASH_SPEED    = 700;  // px/s — matches client constant
+const COMBO_DASH_DURATION = 300;  // ms
+const COMBO_COOLDOWN_MS   = 5000; // ms
 
 let projCounter = 0;
 function nextProjId() { return `p${++projCounter}`; }
@@ -72,7 +75,21 @@ export function applyInput(state: BattleRoomState, playerId: string, input: Play
   if (input.attack && player.attackCooldown <= 0) {
     player.attackCooldown = cfg.attackCooldown;
     player.attackCount    = (player.attackCount + 1) % 256;
-    resolveAttack(state, player);
+    resolveAttack(state, player, input.aimDx ?? 0, input.aimDy ?? 0);
+  }
+
+  if (input.combo && player.comboCooldown <= 0 && player.comboDashTimer <= 0) {
+    const dx  = input.comboDx ?? (player.facing === 'right' ? 1 : -1);
+    const dy  = input.comboDy ?? 0;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx  = dx / len;
+    const ny  = dy / len;
+    player.comboDashVx    = nx * COMBO_DASH_SPEED;
+    player.comboDashVy    = ny * COMBO_DASH_SPEED;
+    player.comboDashTimer = COMBO_DASH_DURATION;
+    player.comboCooldown  = COMBO_COOLDOWN_MS;
+    player.attackCount    = (player.attackCount + 1) % 256;
+    resolveCombo(state, player, nx, ny);
   }
 
   if (Math.abs(player.knockbackX) > 1) {
@@ -83,19 +100,25 @@ export function applyInput(state: BattleRoomState, playerId: string, input: Play
   }
 }
 
-function resolveAttack(state: BattleRoomState, attacker: PlayerSchema) {
+function resolveAttack(state: BattleRoomState, attacker: PlayerSchema, aimDx = 0, aimDy = 0) {
   const cfg = CHARACTER_CONFIGS[attacker.characterType as CharacterType];
 
   if (cfg.isRanged) {
     const id = nextProjId();
     const speed = cfg.projectileSpeed ?? 600;
     const proj = new ProjectileSchema();
-    proj.id        = id;
-    proj.ownerId   = attacker.id;
-    proj.x         = attacker.x;
-    proj.y         = attacker.y - 10;
-    proj.velocityX = attacker.facing === 'right' ? speed : -speed;
-    proj.velocityY = 0;
+    proj.id      = id;
+    proj.ownerId = attacker.id;
+    proj.x       = attacker.x;
+    proj.y       = attacker.y - 10;
+
+    // Use aimed direction if provided; fall back to facing direction
+    const ax = (aimDx !== 0 || aimDy !== 0) ? aimDx : (attacker.facing === 'right' ? 1 : -1);
+    const ay = (aimDx !== 0 || aimDy !== 0) ? aimDy : 0;
+    const len = Math.sqrt(ax * ax + ay * ay) || 1;
+    proj.velocityX = (ax / len) * speed;
+    proj.velocityY = (ay / len) * speed;
+
     proj.damage    = cfg.attackDamage;
     state.projectiles.set(id, proj);
     return;
@@ -108,6 +131,25 @@ function resolveAttack(state: BattleRoomState, attacker: PlayerSchema) {
     const dirMatch = attacker.facing === 'right' ? dx > 0 : dx < 0;
     if (dist <= cfg.attackRange && dirMatch) {
       applyDamage(target, attacker.x, cfg.attackDamage, cfg.knockbackForce);
+    }
+  });
+}
+
+// Swept-box hit detection for the combo dash — checks once at dash start.
+// Hits any enemy within a 80px-wide corridor extending dashRange px in the dash direction.
+function resolveCombo(state: BattleRoomState, attacker: PlayerSchema, nx: number, ny: number) {
+  const cfg       = CHARACTER_CONFIGS[attacker.characterType as CharacterType];
+  const dashRange = COMBO_DASH_SPEED * (COMBO_DASH_DURATION / 1000);
+  const halfWidth = 40;
+
+  state.players.forEach((target) => {
+    if (target.id === attacker.id || target.isDead) return;
+    const relX = target.x - attacker.x;
+    const relY = target.y - attacker.y;
+    const along    = relX * nx + relY * ny;
+    const perpDist = Math.sqrt((relX - along * nx) ** 2 + (relY - along * ny) ** 2);
+    if (along > -20 && along < dashRange && perpDist < halfWidth) {
+      applyDamage(target, attacker.x, cfg.attackDamage * 1.5, cfg.knockbackForce * 1.5);
     }
   });
 }
@@ -137,11 +179,18 @@ export function tick(state: BattleRoomState, dt: number) {
   state.players.forEach((player) => {
     if (player.isDead) return;
 
-    player.velocityY += GRAVITY * dt;
+    if (player.comboDashTimer > 0) {
+      player.comboDashTimer -= dt * 1000;
+      player.velocityX = player.comboDashVx;
+      player.velocityY = player.comboDashVy; // override gravity during dash
+    } else {
+      player.velocityY += GRAVITY * dt;
+    }
     player.x += player.velocityX * dt;
     player.y += player.velocityY * dt;
 
     if (player.attackCooldown > 0) player.attackCooldown -= Math.round(dt * 1000);
+    if (player.comboCooldown  > 0) player.comboCooldown  -= Math.round(dt * 1000);
 
     const cfg = cfgCache.get(player.id) ?? CHARACTER_CONFIGS[player.characterType as CharacterType];
     const pw = cfg.width / 2;
