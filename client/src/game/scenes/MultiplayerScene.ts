@@ -6,8 +6,8 @@ import { CHARACTER_CONFIGS, MAP_CONFIGS } from 'shared';
 import type { CharacterType } from 'shared';
 import { touchInput } from '../touchInput';
 
-const LERP_FACTOR   = 0.18; // remote player position smoothing
-const INPUT_RATE_MS = 50;   // 20fps input send
+const LERP_FACTOR   = 0.25; // remote player position smoothing
+const INPUT_RATE_MS = 50;   // send rate to server (ms)
 
 interface RemoteState {
   x: number;
@@ -43,9 +43,13 @@ export class MultiplayerScene extends BaseScene {
   private remoteAnimPrefix = 'fighter';
   private remoteCurrentAnim = '';
 
-  // Input throttle
-  private inputTimer = 0;
-  private prevInput = { left: false, right: false, jump: false, attack: false };
+  // Input
+  private inputTimer   = 0;
+  private pendingJump   = false;
+  private pendingAttack = false;
+
+  // Local physics prediction
+  private localJumpsUsed = 0;
 
   // Game state
   private localSessionId = '';
@@ -91,36 +95,53 @@ export class MultiplayerScene extends BaseScene {
     this.setupCamera(this.localPlayer);
   }
 
-  update(time: number, delta: number) {
+  update(_time: number, delta: number) {
     if (this.phase !== 'battle') return;
 
     const room = this.config.multiplayerRoom!;
+    const cfg  = CHARACTER_CONFIGS[this.config.characterType];
+    const body = this.localPlayer.body as Phaser.Physics.Arcade.Body;
 
-    // ── Local input ───────────────────────────────────────────────────────────
-    const input = {
-      left:   this.isLeft(),
-      right:  this.isRight(),
-      jump:   this.isJump(),
-      attack: this.isAttack(),
-    };
+    // ── Read input (JustDown consumed once here) ──────────────────────────────
+    const left   = this.isLeft();
+    const right  = this.isRight();
+    const jump   = this.isJump();   // JustDown — true only on press frame
+    const attack = this.isAttack(); // JustDown — true only on press frame
 
+    // Accumulate one-shot inputs between server sends so they're never lost
+    if (jump)   this.pendingJump   = true;
+    if (attack) this.pendingAttack = true;
+
+    // ── Client-side prediction: move local player immediately ─────────────────
+    if (left) {
+      this.localPlayer.setVelocityX(-cfg.speed);
+      this.localPlayer.setFlipX(true);
+    } else if (right) {
+      this.localPlayer.setVelocityX(cfg.speed);
+      this.localPlayer.setFlipX(false);
+    } else {
+      this.localPlayer.setVelocityX(body.velocity.x * 0.7);
+    }
+
+    if (body.blocked.down) this.localJumpsUsed = 0;
+    if (jump && this.localJumpsUsed < 2) {
+      this.localPlayer.setVelocityY(cfg.jumpForce);
+      this.localJumpsUsed++;
+    }
+
+    // ── Send input to server at fixed rate ────────────────────────────────────
     this.inputTimer += delta;
     if (this.inputTimer >= INPUT_RATE_MS) {
       this.inputTimer = 0;
-      if (
-        input.left   !== this.prevInput.left  ||
-        input.right  !== this.prevInput.right ||
-        input.jump   !== this.prevInput.jump  ||
-        input.attack !== this.prevInput.attack
-      ) {
-        room.send('input', input);
-        this.prevInput = { ...input };
-      }
+      room.send('input', {
+        left,
+        right,
+        jump:   this.pendingJump,
+        attack: this.pendingAttack,
+      });
+      this.pendingJump   = false;
+      this.pendingAttack = false;
     }
-
-    // Touch jump consume
-    if (touchInput.jumpPressed) touchInput.jumpPressed = false;
-    if (touchInput.attackPressed) touchInput.attackPressed = false;
 
     // ── Remote player lerp ────────────────────────────────────────────────────
     if (this.remoteSprite && this.remoteState) {
