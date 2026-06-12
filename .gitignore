@@ -5,6 +5,9 @@ node_modules/
 # build output
 dist/
 server/dist/
+shared/src/*.js
+shared/src/*.js.map
+*.tsbuildinfo
 
 # env
 .env
