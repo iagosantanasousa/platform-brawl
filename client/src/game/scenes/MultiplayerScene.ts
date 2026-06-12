@@ -57,8 +57,7 @@ export class MultiplayerScene extends BaseScene {
   private pendingAttack = false;
 
   // Local physics prediction
-  private localJumpsUsed  = 0;
-  private localCurrentAnim = '';
+  private localJumpsUsed = 0;
 
   // Game state
   private localSessionId    = '';
@@ -126,10 +125,10 @@ export class MultiplayerScene extends BaseScene {
     // ── Client-side prediction ────────────────────────────────────────────────
     if (left) {
       this.localPlayer.setVelocityX(-cfg.speed);
-      this.localPlayer.setFlipX(true);
+      this.localPlayer.facing = 'left';
     } else if (right) {
       this.localPlayer.setVelocityX(cfg.speed);
-      this.localPlayer.setFlipX(false);
+      this.localPlayer.facing = 'right';
     } else {
       this.localPlayer.setVelocityX(body.velocity.x * 0.7);
     }
@@ -140,8 +139,13 @@ export class MultiplayerScene extends BaseScene {
       this.localJumpsUsed++;
     }
 
-    // ── Local player animation ────────────────────────────────────────────────
-    this.updateLocalAnim(body);
+    // Trigger attack animation immediately (client-side prediction)
+    if (attack && this.localPlayer.attackCooldown <= 0) {
+      this.localPlayer.triggerAttackAnim();
+      this.localPlayer.attackCooldown = cfg.attackCooldown * 0.5; // half cooldown for combo feel
+    }
+
+    // Player entity manages its own animations via updateFighterAnim() inside update()
     this.localPlayer.update(delta);
 
     // ── Send input to server only during battle ───────────────────────────────
@@ -179,26 +183,6 @@ export class MultiplayerScene extends BaseScene {
     }
   }
 
-  // ── Local player animation ────────────────────────────────────────────────
-
-  private updateLocalAnim(body: Phaser.Physics.Arcade.Body) {
-    const prefix     = this.getSpritePrefix(this.config.characterType);
-    const isGrounded = body.blocked.down;
-    const velX       = body.velocity.x;
-    const velY       = body.velocity.y;
-
-    let anim: string;
-    if (!isGrounded && velY < -50)       anim = `${prefix}_jump`;
-    else if (!isGrounded && velY > 50)   anim = `${prefix}_fall`;
-    else if (Math.abs(velX) > 20)        anim = `${prefix}_run`;
-    else                                 anim = `${prefix}_idle`;
-
-    if (anim !== this.localCurrentAnim) {
-      this.localCurrentAnim = anim;
-      if (this.anims.exists(anim)) this.localPlayer.play(anim, true);
-    }
-  }
-
   // ── State sync ────────────────────────────────────────────────────────────
 
   private syncState(state: any) {
@@ -215,18 +199,12 @@ export class MultiplayerScene extends BaseScene {
           this.localPlayer.setPosition(p.x, p.y);
           this.localJumpsUsed = 0;
         } else {
-          // Server reconciliation: correct prediction drift
+          // Server reconciliation: only hard-snap for large divergence (respawn, knockback).
+          // Avoid soft nudges — they cause a rubber-band feeling at 50Hz.
           const dx = Math.abs(p.x - this.localPlayer.x);
           const dy = Math.abs(p.y - this.localPlayer.y);
-          if (dx > 64 || dy > 64) {
-            // Hard snap for large divergence (e.g. respawn, knockback)
+          if (dx > 128 || dy > 128) {
             this.localPlayer.setPosition(p.x, p.y);
-          } else if (dx > 8 || dy > 8) {
-            // Soft nudge (30%) toward server position for small drift
-            this.localPlayer.setPosition(
-              this.localPlayer.x + (p.x - this.localPlayer.x) * 0.3,
-              this.localPlayer.y + (p.y - this.localPlayer.y) * 0.3,
-            );
           }
         }
         this.updateLocalHud(p.hp, p.maxHp);
