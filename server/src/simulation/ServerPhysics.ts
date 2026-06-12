@@ -9,6 +9,10 @@ const GRAVITY = 900;
 let projCounter = 0;
 function nextProjId() { return `p${++projCounter}`; }
 
+// Cache CHARACTER_CONFIGS per player to avoid repeated string lookups in the hot tick loop
+import type { CharacterConfig } from 'shared';
+const cfgCache = new Map<string, CharacterConfig>();
+
 export function addPlayer(
   state: BattleRoomState,
   id: string,
@@ -16,6 +20,7 @@ export function addPlayer(
   spawnIndex: number,
 ) {
   const cfg = CHARACTER_CONFIGS[characterType];
+  cfgCache.set(id, cfg);
   const map = MAP_CONFIGS[state.mapId as MapId];
   const spawn = map.spawnPoints[spawnIndex % map.spawnPoints.length];
 
@@ -39,13 +44,14 @@ export function addPlayer(
 
 export function removePlayer(state: BattleRoomState, id: string) {
   state.players.delete(id);
+  cfgCache.delete(id);
 }
 
 export function applyInput(state: BattleRoomState, playerId: string, input: PlayerInput) {
   const player = state.players.get(playerId);
   if (!player || player.isDead) return;
 
-  const cfg = CHARACTER_CONFIGS[player.characterType as CharacterType];
+  const cfg = cfgCache.get(playerId) ?? CHARACTER_CONFIGS[player.characterType as CharacterType];
 
   if (input.left) {
     player.velocityX = -cfg.speed;
@@ -125,7 +131,6 @@ function applyDamage(
 }
 
 export function tick(state: BattleRoomState, dt: number) {
-  state.tick++;
   const map = MAP_CONFIGS[state.mapId as MapId];
 
   state.players.forEach((player) => {
@@ -137,7 +142,7 @@ export function tick(state: BattleRoomState, dt: number) {
 
     if (player.attackCooldown > 0) player.attackCooldown -= Math.round(dt * 1000);
 
-    const cfg = CHARACTER_CONFIGS[player.characterType as CharacterType];
+    const cfg = cfgCache.get(player.id) ?? CHARACTER_CONFIGS[player.characterType as CharacterType];
     const pw = cfg.width / 2;
     const ph = cfg.height / 2;
 
@@ -199,14 +204,11 @@ export function tick(state: BattleRoomState, dt: number) {
 
     state.players.forEach((player) => {
       if (player.id === proj.ownerId || player.isDead) return;
-      const cfg = CHARACTER_CONFIGS[player.characterType as CharacterType];
+      const cfg = cfgCache.get(player.id) ?? CHARACTER_CONFIGS[player.characterType as CharacterType];
       const dx = Math.abs(proj.x - player.x);
       const dy = Math.abs(proj.y - player.y);
       if (dx < cfg.width / 2 + 8 && dy < cfg.height / 2 + 8) {
-        const ownerSchema = state.players.get(proj.ownerId);
-        const kbForce = ownerSchema
-          ? CHARACTER_CONFIGS[ownerSchema.characterType as CharacterType].knockbackForce
-          : 200;
+        const kbForce = (cfgCache.get(proj.ownerId) ?? CHARACTER_CONFIGS['fighter']).knockbackForce;
         applyDamage(player, proj.x, proj.damage, kbForce);
         toDelete.push(id);
       }
@@ -221,7 +223,7 @@ function respawnPlayer(state: BattleRoomState, player: PlayerSchema) {
   let idx = 0;
   state.players.forEach((_, key) => { if (key === player.id) return; idx++; });
   const spawn = map.spawnPoints[idx % map.spawnPoints.length];
-  const cfg   = CHARACTER_CONFIGS[player.characterType as CharacterType];
+  const cfg   = cfgCache.get(player.id) ?? CHARACTER_CONFIGS[player.characterType as CharacterType];
 
   player.x             = spawn.x;
   player.y             = spawn.y - 50;

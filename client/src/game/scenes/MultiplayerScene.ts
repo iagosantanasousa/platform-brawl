@@ -7,8 +7,9 @@ import { CHARACTER_CONFIGS, MAP_CONFIGS } from 'shared';
 import type { CharacterType } from 'shared';
 import { touchInput } from '../touchInput';
 
-const SERVER_FPS    = 50;  // server tick rate
-const INPUT_RATE_MS = 50;  // send rate to server (ms)
+const SERVER_FPS             = 50;   // server tick rate
+const INPUT_RATE_MS          = 50;   // send rate to server (ms)
+const INTERPOLATION_BUFFER   = 100;  // ms — 5 ticks buffer, enough to survive packet jitter
 
 interface RemoteState {
   x: number;
@@ -26,9 +27,15 @@ interface RemoteState {
 
 export class MultiplayerScene extends BaseScene {
   private localPlayer!: Player;
-  private remoteSprite?: Phaser.GameObjects.Sprite;
-  private remoteHpBar?: Phaser.GameObjects.Graphics;
+  private remoteSprite?:    Phaser.GameObjects.Sprite;
+  private remoteHpBarBg?:   Phaser.GameObjects.Rectangle;
+  private remoteHpBarFill?: Phaser.GameObjects.Rectangle;
+  private remoteHpLastHp  = -1;
   private remoteNameLabel?: Phaser.GameObjects.Text;
+
+  // Dead reckoning velocity (independent from authoritative remoteState)
+  private drVelX = 0;
+  private drVelY = 0;
 
   // HUD texts
   private localHpText!: Phaser.GameObjects.Text;
@@ -50,7 +57,8 @@ export class MultiplayerScene extends BaseScene {
   private pendingAttack = false;
 
   // Local physics prediction
-  private localJumpsUsed = 0;
+  private localJumpsUsed  = 0;
+  private localCurrentAnim = '';
 
   // Game state
   private localSessionId    = '';
@@ -81,6 +89,7 @@ export class MultiplayerScene extends BaseScene {
     this.localSessionId = room.sessionId;
 
     this.SI = new SnapshotInterpolation(SERVER_FPS);
+    this.SI.interpolationBuffer.set(INTERPOLATION_BUFFER);
 
     // Set up remote sprite (created lazily when remote player appears)
     this.setupHUD(map.width, map.height);
@@ -103,6 +112,7 @@ export class MultiplayerScene extends BaseScene {
     const room = this.config.multiplayerRoom!;
     const cfg  = CHARACTER_CONFIGS[this.config.characterType];
     const body = this.localPlayer.body as Phaser.Physics.Arcade.Body;
+    const dt   = delta / 1000;
 
     // ── Read input ────────────────────────────────────────────────────────────
     const left   = this.isLeft();
@@ -113,7 +123,7 @@ export class MultiplayerScene extends BaseScene {
     if (jump)   this.pendingJump   = true;
     if (attack) this.pendingAttack = true;
 
-    // ── Client-side prediction: ALWAYS move local player, no phase gate ───────
+    // ── Client-side prediction ────────────────────────────────────────────────
     if (left) {
       this.localPlayer.setVelocityX(-cfg.speed);
       this.localPlayer.setFlipX(true);
@@ -130,7 +140,8 @@ export class MultiplayerScene extends BaseScene {
       this.localJumpsUsed++;
     }
 
-    // Keep HP bar and name label positioned correctly
+    // ── Local player animation ────────────────────────────────────────────────
+    this.updateLocalAnim(body);
     this.localPlayer.update(delta);
 
     // ── Send input to server only during battle ───────────────────────────────
@@ -139,8 +150,7 @@ export class MultiplayerScene extends BaseScene {
       if (this.inputTimer >= INPUT_RATE_MS) {
         this.inputTimer = 0;
         room.send('input', {
-          left,
-          right,
+          left, right,
           jump:   this.pendingJump,
           attack: this.pendingAttack,
         });
@@ -149,7 +159,7 @@ export class MultiplayerScene extends BaseScene {
       }
     }
 
-    // ── Remote player — snapshot interpolation (smooth, no jumps) ────────────
+    // ── Remote player — snapshot interpolation + dead reckoning ──────────────
     if (this.remoteSprite && this.remoteState) {
       const snap = this.SI.calcInterpolation('x y');
       if (snap) {
@@ -158,9 +168,34 @@ export class MultiplayerScene extends BaseScene {
           this.remoteSprite.x = s.x;
           this.remoteSprite.y = s.y;
         }
+      } else {
+        // Dead reckoning: extrapolate with gravity matching server (GRAVITY = 900)
+        this.drVelY += 900 * dt;
+        this.remoteSprite.x += this.drVelX * dt;
+        this.remoteSprite.y += this.drVelY * dt;
       }
       this.updateRemoteAnim(this.remoteState);
       this.updateRemoteHpBar();
+    }
+  }
+
+  // ── Local player animation ────────────────────────────────────────────────
+
+  private updateLocalAnim(body: Phaser.Physics.Arcade.Body) {
+    const prefix     = this.getSpritePrefix(this.config.characterType);
+    const isGrounded = body.blocked.down;
+    const velX       = body.velocity.x;
+    const velY       = body.velocity.y;
+
+    let anim: string;
+    if (!isGrounded && velY < -50)       anim = `${prefix}_jump`;
+    else if (!isGrounded && velY > 50)   anim = `${prefix}_fall`;
+    else if (Math.abs(velX) > 20)        anim = `${prefix}_run`;
+    else                                 anim = `${prefix}_idle`;
+
+    if (anim !== this.localCurrentAnim) {
+      this.localCurrentAnim = anim;
+      if (this.anims.exists(anim)) this.localPlayer.play(anim, true);
     }
   }
 
@@ -174,15 +209,29 @@ export class MultiplayerScene extends BaseScene {
 
     state.players.forEach((p: any, id: string) => {
       if (id === this.localSessionId) {
-        // First sync: snap local player to server spawn position
         if (!this.localInitialized) {
+          // First sync: snap to server spawn
           this.localInitialized = true;
           this.localPlayer.setPosition(p.x, p.y);
           this.localJumpsUsed = 0;
+        } else {
+          // Server reconciliation: correct prediction drift
+          const dx = Math.abs(p.x - this.localPlayer.x);
+          const dy = Math.abs(p.y - this.localPlayer.y);
+          if (dx > 64 || dy > 64) {
+            // Hard snap for large divergence (e.g. respawn, knockback)
+            this.localPlayer.setPosition(p.x, p.y);
+          } else if (dx > 8 || dy > 8) {
+            // Soft nudge (30%) toward server position for small drift
+            this.localPlayer.setPosition(
+              this.localPlayer.x + (p.x - this.localPlayer.x) * 0.3,
+              this.localPlayer.y + (p.y - this.localPlayer.y) * 0.3,
+            );
+          }
         }
         this.updateLocalHud(p.hp, p.maxHp);
       } else {
-        // Remote player — add snapshot for smooth interpolation
+        // Remote player — update authoritative state and reset dead reckoning velocity
         this.remoteState = {
           x: p.x, y: p.y,
           velocityX: p.velocityX, velocityY: p.velocityY,
@@ -191,6 +240,8 @@ export class MultiplayerScene extends BaseScene {
           characterType: p.characterType as CharacterType,
           team: p.team ?? '',
         };
+        this.drVelX = p.velocityX;
+        this.drVelY = p.velocityY;
 
         const snapshot = this.SI.snapshot.create([{
           id: this.remoteId, x: p.x, y: p.y,
@@ -215,11 +266,13 @@ export class MultiplayerScene extends BaseScene {
     if (this.remoteSprite && this.remoteAnimPrefix === this.getSpritePrefix(characterType)) return;
 
     this.remoteSprite?.destroy();
-    this.remoteHpBar?.destroy();
+    this.remoteHpBarBg?.destroy();
+    this.remoteHpBarFill?.destroy();
     this.remoteNameLabel?.destroy();
 
     const prefix = this.getSpritePrefix(characterType);
     this.remoteAnimPrefix = prefix;
+    this.remoteHpLastHp   = -1;
 
     const pos = this.remoteState ?? { x: 0, y: 0 };
 
@@ -227,10 +280,14 @@ export class MultiplayerScene extends BaseScene {
       .setScale(0.5)
       .setDepth(5);
 
-    this.remoteHpBar = this.add.graphics().setDepth(10).setScrollFactor(0);
+    // Rectangles are repositioned each frame (cheap) and only resized on HP change
+    this.remoteHpBarBg   = this.add.rectangle(0, 0, 48, 5, 0x222222)
+      .setAlpha(0.8).setDepth(10).setScrollFactor(0).setOrigin(0, 0.5);
+    this.remoteHpBarFill = this.add.rectangle(0, 0, 48, 5, 0x22cc55)
+      .setDepth(11).setScrollFactor(0).setOrigin(0, 0.5);
     this.remoteNameLabel = this.add.text(0, 0, '', {
       fontSize: '10px', color: '#ff6666', stroke: '#000', strokeThickness: 2,
-    }).setDepth(11).setScrollFactor(0).setOrigin(0.5, 1);
+    }).setDepth(12).setScrollFactor(0).setOrigin(0.5, 1);
   }
 
   private getSpritePrefix(characterType: CharacterType) {
@@ -265,23 +322,25 @@ export class MultiplayerScene extends BaseScene {
   }
 
   private updateRemoteHpBar() {
-    if (!this.remoteHpBar || !this.remoteSprite || !this.remoteState) return;
+    if (!this.remoteHpBarBg || !this.remoteHpBarFill || !this.remoteSprite || !this.remoteState) return;
 
-    const map = MAP_CONFIGS[this.config.mapId];
-    const screenX = this.remoteSprite.x - this.cameras.main.scrollX;
-    const screenY = this.remoteSprite.y - this.cameras.main.scrollY - 56;
-    const pct     = Math.max(0, this.remoteState.hp / this.remoteState.maxHp);
-    const barW    = 48;
-    const barH    = 5;
+    const screenX = this.remoteSprite.x - this.cameras.main.scrollX - 24; // left-align origin
+    const screenY = this.remoteSprite.y - this.cameras.main.scrollY - 58;
 
-    this.remoteHpBar.clear();
-    this.remoteHpBar.fillStyle(0x222222, 0.8);
-    this.remoteHpBar.fillRect(screenX - barW / 2, screenY, barW, barH);
-    this.remoteHpBar.fillStyle(pct > 0.5 ? 0x22cc55 : pct > 0.25 ? 0xf59e0b : 0xef4444);
-    this.remoteHpBar.fillRect(screenX - barW / 2, screenY, Math.round(barW * pct), barH);
+    // Always reposition (cheap — just updates transform)
+    this.remoteHpBarBg.setPosition(screenX, screenY);
+    this.remoteHpBarFill.setPosition(screenX, screenY);
 
     if (this.remoteNameLabel) {
-      this.remoteNameLabel.setPosition(screenX, screenY - 2);
+      this.remoteNameLabel.setPosition(screenX + 24, screenY - 4);
+    }
+
+    // Only resize/recolor when HP changes (avoids per-frame texture rebuild)
+    if (this.remoteState.hp !== this.remoteHpLastHp) {
+      this.remoteHpLastHp = this.remoteState.hp;
+      const pct   = Math.max(0, this.remoteState.hp / this.remoteState.maxHp);
+      const color = pct > 0.5 ? 0x22cc55 : pct > 0.25 ? 0xf59e0b : 0xef4444;
+      this.remoteHpBarFill.setSize(Math.round(48 * pct), 5).setFillStyle(color);
     }
   }
 

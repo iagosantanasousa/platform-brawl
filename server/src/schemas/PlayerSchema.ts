@@ -11,10 +11,10 @@ export class PlayerSchema extends Schema {
   @type('int16')   maxHp         = 100;
   @type('string')  facing        = 'right';
   @type('boolean') isGrounded    = false;
-  @type('uint8')   jumpsUsed     = 0;
-  @type('int32')   attackCooldown = 0;
+  jumpsUsed      = 0;   // server-only
+  attackCooldown = 0;   // server-only (ms remaining)
   @type('boolean') isDead        = false;
-  @type('float32') knockbackX    = 0;
+  knockbackX     = 0;   // server-only
   @type('string')  team          = '';    // 'A' | 'B' | ''
   @type('boolean') isReady       = false;
 }

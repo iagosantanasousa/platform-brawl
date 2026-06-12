@@ -1,6 +1,6 @@
 export type CharacterType = 'fighter' | 'archer' | 'tank';
 
-export type MapId = 'arena' | 'corridors';
+export type MapId = 'arena' | 'coliseum';
 
 export type GameMode = 'training' | 'multiplayer';
 

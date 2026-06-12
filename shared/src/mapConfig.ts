@@ -55,42 +55,50 @@ export const MAP_CONFIGS: Record<MapId, MapConfig> = {
       { x: 800, y: 224, width: 128, height: 64 },
     ],
   },
-  corridors: {
-    id: 'corridors',
-    label: 'Corredores',
-    width: 960,
+  coliseum: {
+    id: 'coliseum',
+    label: 'Coliseu',
+    width: 3840,
     height: 540,
-    backgroundColor: 0x1a2530,
-    description: 'Arena com corredores, obstáculos e plataformas menores.',
+    backgroundColor: 0x1a1a2d,
+    description: 'Grande arena 4× com zonas simétricas para batalhas em equipes.',
     spawnPoints: [
-      { x: 140, y: 270 },
-      { x: 820, y: 270 },
+      { x: 200, y: 460 },
+      { x: 3640, y: 460 },
     ],
     platforms: [
-      // Ground left (2 tile rows; bottom clips below canvas)
-      { x: 0,   y: 508, width: 320, height: 64 },
-      // Ground right
-      { x: 640, y: 508, width: 320, height: 64 },
-      // Left wall
-      { x: 0,   y: 0,   width: 32,  height: 544 },
-      // Right wall
-      { x: 928, y: 0,   width: 32,  height: 544 },
-      // Center pillar (4×4 tiles — wallable)
-      { x: 416, y: 384, width: 128, height: 128 },
-      // Mid-level left
-      { x: 64,  y: 320, width: 192, height: 64 },
-      // Mid-level right
-      { x: 704, y: 320, width: 192, height: 64 },
-      // Upper left
-      { x: 32,  y: 192, width: 128, height: 64 },
-      // Upper right
-      { x: 800, y: 192, width: 128, height: 64 },
-      // Upper center left
-      { x: 288, y: 240, width: 128, height: 64 },
-      // Upper center right
-      { x: 544, y: 240, width: 128, height: 64 },
-      // Top center bridge
-      { x: 384, y: 144, width: 192, height: 64 },
+      // Boundary walls
+      { x: 0,    y: 0, width: 32,   height: 544 },
+      { x: 3808, y: 0, width: 32,   height: 544 },
+      // Full ground
+      { x: 0, y: 508, width: 3840, height: 64 },
+
+      // ── Left zone (0–960) ──
+      { x: 64,  y: 224, width: 160, height: 64  }, // left high
+      { x: 96,  y: 384, width: 192, height: 64  }, // left mid
+      { x: 352, y: 288, width: 192, height: 64  }, // left-center
+      { x: 640, y: 224, width: 192, height: 64  }, // left approach bridge
+      { x: 736, y: 416, width: 128, height: 128 }, // left approach pillar (wallable)
+
+      // ── Center-left zone (960–1920) ──
+      { x: 960,  y: 288, width: 256, height: 64  }, // center-left mid
+      { x: 1152, y: 160, width: 256, height: 64  }, // center-left high
+      { x: 1344, y: 384, width: 128, height: 160 }, // center-left pillar (wallable)
+
+      // ── Top center bridge ──
+      { x: 1664, y: 128, width: 512, height: 64 },
+
+      // ── Center-right zone (1920–2880) ──
+      { x: 2368, y: 384, width: 128, height: 160 }, // center-right pillar (wallable)
+      { x: 2432, y: 160, width: 256, height: 64  }, // center-right high
+      { x: 2624, y: 288, width: 256, height: 64  }, // center-right mid
+
+      // ── Right zone (2880–3840) ──
+      { x: 2976, y: 416, width: 128, height: 128 }, // right approach pillar (wallable)
+      { x: 3008, y: 224, width: 192, height: 64  }, // right approach bridge
+      { x: 3296, y: 288, width: 192, height: 64  }, // right-center
+      { x: 3552, y: 384, width: 192, height: 64  }, // right mid
+      { x: 3616, y: 224, width: 160, height: 64  }, // right high
     ],
   },
 };

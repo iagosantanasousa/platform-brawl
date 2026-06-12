@@ -6,16 +6,10 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      shared: path.resolve(__dirname, '../shared/src'),
+      shared: path.resolve(__dirname, 'src/shared/index.ts'),
     },
   },
   server: {
     port: 3000,
-    proxy: {
-      '/socket.io': {
-        target: 'http://localhost:4000',
-        ws: true,
-      },
-    },
   },
 });
