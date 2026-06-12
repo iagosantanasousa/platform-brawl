@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { CharacterType, MapId } from 'shared';
-import type { Room } from 'colyseus.js';
+import type { Room } from '@colyseus/sdk';
 import Lobby from './ui/Lobby';
 import OnlineRoom from './ui/OnlineRoom';
 import GameContainer from './ui/GameContainer';

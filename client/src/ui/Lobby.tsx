@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { CharacterType, MapId } from 'shared';
 import { CHARACTER_CONFIGS, MAP_CONFIGS } from 'shared';
-import type { Room } from 'colyseus.js';
+import type { Room } from '@colyseus/sdk';
 import type { GameConfig, TeamSlot, SlotRole } from '../App';
 import { createRoom, joinRoom } from '../game/network/colyseusClient';
 

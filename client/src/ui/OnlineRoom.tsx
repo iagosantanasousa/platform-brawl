@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Room } from 'colyseus.js';
+import type { Room } from '@colyseus/sdk';
 import type { CharacterType } from 'shared';
 import { CHARACTER_CONFIGS } from 'shared';
 import type { GameConfig } from '../App';
