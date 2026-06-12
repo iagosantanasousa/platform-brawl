@@ -120,25 +120,53 @@ Causa: `shared/package.json` tinha `typescript` em `devDependencies` mas o `pnpm
 #### Observação importante sobre o Render
 O `render.yaml` só é lido na **criação do serviço**. Mudanças posteriores precisam ser feitas manualmente no dashboard. O serviço foi criado com build command incorreto (`pnpm install && pnpm --filter server build`).
 
-### Status: PAUSADO (2026-06-03)
-
-Implementação do modo multiplayer pausada indefinidamente. Não continuar agora.
-
-Se retomar no futuro, o único passo de infra pendente é:
-- No dashboard do Render → serviço `platform-brawl` → **Settings → Build Command**, trocar para:
-  ```
-  pnpm install --no-frozen-lockfile && pnpm --filter shared build && pnpm --filter server build
-  ```
-- Clicar em **Manual Deploy → Deploy latest commit** (commit `7e2b09c`)
-- O Start Command já está correto: `pnpm --filter server start`
+### Status: EM DESENVOLVIMENTO (2026-06-12)
 
 ---
 
-## Próximos passos de funcionalidade (após deploy funcionar)
+## O que foi adicionado (sessão 2026-06-12)
 
-- [ ] Testar a partida completa 1v1 em produção
-- [ ] HP bar no HUD para ambos os jogadores
-- [ ] Tela de fim de jogo com opção de rolar novamente
-- [ ] Contagem de vidas / rounds (melhor de 3)
+### Sala com seleção de time e personagem
+
+**Servidor:**
+- `PlayerSchema`: novos campos `team` ('A'|'B'|'') e `isReady` (boolean)
+- `BattleRoom`: game não inicia mais automaticamente; novos handlers:
+  - `select_team` — jogador escolhe time A ou B (bloqueado se já ocupado)
+  - `select_character` — troca personagem na sala de espera
+  - `player_ready` — marca pronto; inicia countdown quando ambos com times distintos e prontos
+  - `unready` — cancela estado pronto
+
+**Cliente:**
+- `colyseusClient.ts` recriado — singleton com workaround de versão 0.17/0.16
+- `OnlineRoom.tsx` criado — sala de espera online: mostra código, colunas de time, seletor de personagem, botão Pronto
+- `MultiplayerScene.ts` recriado — cena Phaser para batalha online (lerp do jogador remoto, HUD, overlays)
+- `Lobby.tsx` — novo botão "Online" no menu de modos; novo step com "Criar Sala" / "Entrar por Código"
+- `App.tsx` — tela `online-room` adicionada; `GameConfig` recebe campo opcional `multiplayerRoom`
+- `phaserGame.ts` — detecta `config.multiplayerRoom` e usa `MultiplayerScene` em vez de `TrainingScene`
+
+### Fluxo do modo Online
+1. Lobby → Plataforma → Online → Criar Sala ou Entrar por Código
+2. Sala de espera: código visível e copiável, colunas Time A / Time B, seletor de personagem
+3. Ambos clicam Pronto com times diferentes → countdown de 3s → batalha
+4. Fim de jogo: overlay com vencedor e opção de sair com ESC
+
+---
+
+## Infra pendente (Render deploy)
+
+Se retomar deploy, no dashboard do Render → `platform-brawl` → **Settings → Build Command**:
+```
+pnpm install --no-frozen-lockfile && pnpm --filter shared build && pnpm --filter server build
+```
+O Start Command já está correto: `pnpm --filter server start`
+
+---
+
+## Próximos passos
+
+- [ ] Testar partida completa 1v1 local (dois terminais/abas)
+- [ ] Deploy no Render e teste em produção
+- [ ] Tela de fim de jogo com botão "Jogar de novo" (recria sala)
 - [ ] Indicador de "servidor acordando" (Render free tier dorme após 15min)
 - [ ] Remover arquivos legados: `server/src/gameState.ts`, `server/src/rooms.ts`
+- [ ] Rounds (melhor de 3) / contagem de vidas

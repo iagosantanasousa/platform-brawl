@@ -1,107 +1,47 @@
-import { Client, Room } from 'colyseus.js';
-import type { CharacterType, MapId } from 'shared';
+import { Client } from 'colyseus.js';
+import type { Room } from 'colyseus.js';
 
-// Mirrors BattleRoomState fields for client-side type safety
-export interface RemotePlayerState {
-  id: string;
-  characterType: string;
-  x: number;
-  y: number;
-  velocityX: number;
-  velocityY: number;
-  hp: number;
-  maxHp: number;
-  facing: string;
-  isGrounded: boolean;
-  jumpsUsed: number;
-  attackCooldown: number;
-  isDead: boolean;
-  knockbackX: number;
+const SERVER_URL = (import.meta as any).env?.VITE_SERVER_URL ?? 'ws://localhost:4000';
+
+let client: Client | null = null;
+
+function getClient(): Client {
+  if (!client) client = new Client(SERVER_URL);
+  return client;
 }
 
-export interface RemoteProjectileState {
-  id: string;
-  ownerId: string;
-  x: number;
-  y: number;
-  velocityX: number;
-  velocityY: number;
-  damage: number;
+// Colyseus.js 0.16 espera { room: { name, roomId }, sessionId, ... }
+// mas o servidor 0.17 retorna { name, roomId, sessionId, ... } direto.
+// Fazemos o fetch manual e transformamos a resposta.
+async function fetchMatchmaker(path: string, body: object = {}): Promise<Room> {
+  const httpUrl = SERVER_URL.replace(/^ws/, 'http');
+  const res = await fetch(`${httpUrl}/matchmake/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+
+  // Encapsula no formato que o cliente 0.16 espera
+  const reservation = { room: data, ...data };
+  return getClient().consumeSeatReservation(reservation) as Promise<Room>;
 }
 
-export interface RemoteBattleState {
-  mapId: string;
-  phase: string;
-  winner: string;
-  countdown: number;
-  tick: number;
-  players: { forEach: (cb: (v: RemotePlayerState, k: string) => void) => void };
-  projectiles: { forEach: (cb: (v: RemoteProjectileState, k: string) => void) => void };
+export async function createRoom(): Promise<Room> {
+  return fetchMatchmaker('create/battle');
 }
 
-const RAW_URL = (import.meta as any).env?.VITE_SERVER_URL ?? 'wss://platform-brawl.onrender.com';
-const HTTP_URL = RAW_URL.replace(/^ws(s?)/, 'http$1');
-
-class ColyseusClientWrapper {
-  private client = new Client(RAW_URL);
-  private room: Room<RemoteBattleState> | null = null;
-
-  async createRoom(characterType: CharacterType, mapId: MapId): Promise<Room<RemoteBattleState>> {
-    const raw = await this.fetchMatchmaker('create', 'battle', { characterType, mapId });
-    this.room = await (this.client as any).consumeSeatReservation(
-      this.toV016Format(raw),
-    ) as Room<RemoteBattleState>;
-    return this.room;
-  }
-
-  async joinRoom(roomId: string, characterType: CharacterType): Promise<Room<RemoteBattleState>> {
-    const raw = await this.fetchMatchmaker('joinById', roomId, { characterType });
-    this.room = await (this.client as any).consumeSeatReservation(
-      this.toV016Format(raw),
-    ) as Room<RemoteBattleState>;
-    return this.room;
-  }
-
-  getRoom(): Room<RemoteBattleState> | null {
-    return this.room;
-  }
-
-  async leave() {
-    if (this.room) {
-      await this.room.leave();
-      this.room = null;
-    }
-  }
-
-  // Direct matchmaker fetch — bypasses colyseus.js internal HTTP so we can
-  // intercept the response before consumeSeatReservation reads it.
-  private async fetchMatchmaker(method: string, roomName: string, options: object) {
-    const res = await fetch(`${HTTP_URL}/matchmake/${method}/${roomName}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(options),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
-    return data;
-  }
-
-  // Colyseus 0.17 server returns flat { name, roomId, sessionId, processId }.
-  // colyseus.js 0.16 consumeSeatReservation expects { room: { name, roomId, ... }, sessionId }.
-  private toV016Format(raw: any) {
-    return {
-      room: {
-        name:          raw.name,
-        roomId:        raw.roomId,
-        processId:     raw.processId,
-        publicAddress: raw.publicAddress,
-      },
-      sessionId:        raw.sessionId,
-      reconnectionToken: raw.reconnectionToken,
-      devMode:          raw.devMode,
-      protocol:         raw.protocol,
-    };
-  }
+export async function joinRoom(code: string): Promise<Room> {
+  return fetchMatchmaker(`joinById/${code}`);
 }
 
-export const colyseusClient = new ColyseusClientWrapper();
+export function leaveRoom(room: Room) {
+  room.leave();
+  client = null;
+}

@@ -8,7 +8,7 @@ let gameInstance: Phaser.Game | null = null;
 export function initGame(container: HTMLElement, config: AppConfig, onBack: () => void) {
   if (gameInstance) gameInstance.destroy(true);
 
-  const SceneClass = config.mode === 'training' ? TrainingScene : MultiplayerScene;
+  const SceneClass = config.multiplayerRoom ? MultiplayerScene : TrainingScene;
 
   gameInstance = new Phaser.Game({
     type: Phaser.AUTO,

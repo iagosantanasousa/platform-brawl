@@ -15,4 +15,6 @@ export class PlayerSchema extends Schema {
   @type('int32')   attackCooldown = 0;
   @type('boolean') isDead        = false;
   @type('float32') knockbackX    = 0;
+  @type('string')  team          = '';    // 'A' | 'B' | ''
+  @type('boolean') isReady       = false;
 }
