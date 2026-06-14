@@ -9,7 +9,7 @@ import type { CharacterType } from 'shared';
 
 const SERVER_FPS             = 50;   // server tick rate
 const INPUT_RATE_MS          = 20;   // send rate to server (ms) — reduced for lower attack latency
-const INTERPOLATION_BUFFER   = 200;  // ms — 10 ticks buffer; Render free-tier RTT ~150-200ms
+const INTERPOLATION_BUFFER   = 100;  // ms — the smaller this is, the more responsive opponents look
 
 interface RemoteState {
   x: number;
@@ -130,23 +130,23 @@ export class MultiplayerScene extends BaseScene {
       this.onBack();
     });
 
-    // Toast notification ("Copiado!")
-    this.toastText = this.add.text(map.width / 2, 40, '', {
+    // Toast notification — centered, uses actual screen width via this.scale
+    this.toastText = this.add.text(this.scale.width / 2, 48, '', {
       fontSize: '13px', color: '#00ff88', backgroundColor: '#00000099',
       padding: { x: 10, y: 6 },
     }).setOrigin(0.5, 0).setDepth(200).setScrollFactor(0).setVisible(false);
 
-    // Debug button — top-right corner, always visible
-    const debugBtn = this.add.text(map.width - 8, 8, '[ 📋 DEBUG ]', {
-      fontSize: '11px', color: '#aaffcc', backgroundColor: '#00000088',
+    // Debug button — top-left in actual screen coords (safe on any window size)
+    const debugBtn = this.add.text(8, 48, '[DEBUG]', {
+      fontSize: '12px', color: '#aaffcc', backgroundColor: '#000000bb',
       padding: { x: 6, y: 4 },
-    }).setOrigin(1, 0).setDepth(200).setScrollFactor(0)
+    }).setOrigin(0, 0).setDepth(200).setScrollFactor(0)
       .setInteractive({ useHandCursor: true })
       .on('pointerover', () => debugBtn.setColor('#ffffff'))
       .on('pointerout',  () => debugBtn.setColor('#aaffcc'))
       .on('pointerdown', () => this.copyDebugToClipboard());
 
-    // P key also triggers it (fallback)
+    // P key also triggers it
     this.input.keyboard!.on('keydown-P', () => this.copyDebugToClipboard());
 
     // Ping/pong for RTT measurement
@@ -309,12 +309,15 @@ export class MultiplayerScene extends BaseScene {
       ps.sprite.setPosition(ps.x, ps.y);
     });
 
-    // Ping (every 2 s)
+    // Ping + auto console.log debug (every 3 s during battle)
     this.pingTimer -= delta;
     if (this.pingTimer <= 0) {
-      this.pingTimer = 2000;
+      this.pingTimer = 3000;
       this.pingTs = Date.now();
-      try { room.send('ping', { ts: this.pingTs }); } catch { /* ignore if not connected */ }
+      try { room.send('ping', { ts: this.pingTs }); } catch { /* ignore */ }
+      if (this.phase === 'battle') {
+        console.log('%c[DEBUG]', 'color:#00ff88;font-weight:bold', this.buildDebugSnapshot());
+      }
     }
 
     // Toast fade-out
