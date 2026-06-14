@@ -3,7 +3,6 @@ import { SnapshotInterpolation } from '@geckos.io/snapshot-interpolation';
 import type { GameConfig } from '../../App';
 import { BaseScene } from './BaseScene';
 import { Player } from '../entities/Player';
-import { Projectile } from '../entities/Projectile';
 import { CHARACTER_CONFIGS, MAP_CONFIGS } from 'shared';
 import type { CharacterType } from 'shared';
 
@@ -70,7 +69,7 @@ export class MultiplayerScene extends BaseScene {
 
   // Projectile visuals with dead-reckoning state (arrows/projectiles for both players)
   private projectiles = new Map<string, {
-    sprite: Projectile;
+    sprite: Phaser.GameObjects.Image;
     x: number; y: number;
     vx: number; vy: number;
   }>();
@@ -156,6 +155,17 @@ export class MultiplayerScene extends BaseScene {
       if (this.rttSamples.length > 10) this.rttSamples.shift();
       this.rtt = Math.round(this.rttSamples.reduce((a, b) => a + b, 0) / this.rttSamples.length);
     });
+
+    // Pre-generate the arrow texture here (in the main create() flow, safe to call GL ops)
+    if (!this.textures.exists('arrow_proj')) {
+      const g = this.make.graphics({ x: 0, y: 0 }, false);
+      g.fillStyle(0xc8a060);
+      g.fillRect(0, 3, 16, 2);
+      g.fillStyle(0xe0e0e0);
+      g.fillTriangle(12, 0, 16, 4, 12, 8);
+      g.generateTexture('arrow_proj', 16, 8);
+      g.destroy();
+    }
 
     this.setupCamera(this.localPlayer);
   }
@@ -444,11 +454,10 @@ export class MultiplayerScene extends BaseScene {
       activeIds.add(id);
       let ps = this.projectiles.get(id);
       if (!ps) {
-        // Use the same Projectile entity as offline mode: arrow_proj texture + rotated sprite.
-        // Pass velocity = 0 and disable body — we drive position manually from server state.
-        const sprite = new Projectile(this, proj.x, proj.y, 'archer', proj.ownerId, 0, 0);
-        (sprite.body as Phaser.Physics.Arcade.Body).enable = false;
-        sprite.setRotation(Math.atan2(proj.velocityY, proj.velocityX));
+        // Plain image — no physics body, safe to create from async onStateChange callback.
+        const sprite = this.add.image(proj.x, proj.y, 'arrow_proj')
+          .setDepth(8)
+          .setRotation(Math.atan2(proj.velocityY, proj.velocityX));
         ps = { sprite, x: proj.x, y: proj.y, vx: proj.velocityX, vy: proj.velocityY };
         this.projectiles.set(id, ps);
       } else {
