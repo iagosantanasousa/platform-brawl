@@ -220,6 +220,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     a.create({ key: 'fighter_attack3', frames: a.generateFrameNumbers('fighter_attack3', { start: 0, end: 4 }), frameRate: 15, repeat: 0 });
 
     def('archer');
+    // No archer_attack3 sprite yet — reuse attack2 frames so the 3rd shot is never silent.
+    a.create({ key: 'archer_attack3', frames: a.generateFrameNumbers('archer_attack2', { start: 0, end: 3 }), frameRate: 15, repeat: 0 });
 
     // Archer aim — run animations loop while the player runs+aims
     for (const key of [

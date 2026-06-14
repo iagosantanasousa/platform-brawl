@@ -8,7 +8,7 @@ import type { CharacterType } from 'shared';
 
 const SERVER_FPS             = 50;   // server tick rate
 const INPUT_RATE_MS          = 20;   // send rate to server (ms) — reduced for lower attack latency
-const INTERPOLATION_BUFFER   = 100;  // ms — 5 ticks buffer, enough to survive packet jitter
+const INTERPOLATION_BUFFER   = 200;  // ms — 10 ticks buffer; Render free-tier RTT ~150-200ms
 
 interface RemoteState {
   x: number;
@@ -67,11 +67,19 @@ export class MultiplayerScene extends BaseScene {
   // Local physics prediction
   private localJumpsUsed = 0;
 
+  // Projectile visuals with dead-reckoning state (arrows/projectiles for both players)
+  private projectiles = new Map<string, {
+    gfx: Phaser.GameObjects.Graphics;
+    x: number; y: number;
+    vx: number; vy: number;
+  }>();
+
   // Game state
   private localSessionId    = '';
   private phase             = 'waiting';
   private hasShownFinish    = false;
   private localInitialized  = false; // true after first server sync positions local player
+  private localLastHp       = -1;   // last server-confirmed HP; used to detect knockback snaps
 
   constructor(config: GameConfig, onBack: () => void) {
     super('MultiplayerScene', config, onBack);
@@ -126,8 +134,9 @@ export class MultiplayerScene extends BaseScene {
     const right       = this.isRight();
     const jump        = this.isJump();
     const attack      = this.isAttack();
-    const attackHeld  = this.isAttackHeld();
     const isArcher    = this.config.characterType === 'archer';
+    // Archer uses a dedicated hold check so mobile's archerAimHeld touch event is read correctly.
+    const attackHeld  = isArcher ? this.isArcherAimHeld() : this.isAttackHeld();
 
     if (jump) this.pendingJump = true;
 
@@ -246,14 +255,22 @@ export class MultiplayerScene extends BaseScene {
           }
         }
       } else {
-        // Dead reckoning: only apply gravity when airborne — grounded players don't fall
+        // Dead reckoning: gravity for airborne, gentle lateral friction to prevent drift
         if (!this.remoteState.isGrounded) this.drVelY += 900 * dt;
+        this.drVelX *= Math.pow(0.7, dt); // matches server friction coefficient
         this.remoteSprite.x += this.drVelX * dt;
         this.remoteSprite.y += this.drVelY * dt;
       }
       this.updateRemoteAnim(this.remoteState);
       this.updateRemoteHpBar();
     }
+
+    // Advance projectiles between server patches (dead-reckoning)
+    this.projectiles.forEach((ps) => {
+      ps.x += ps.vx * dt;
+      ps.y += ps.vy * dt;
+      this.drawProjectile(ps);
+    });
   }
 
   // ── State sync ────────────────────────────────────────────────────────────
@@ -264,6 +281,8 @@ export class MultiplayerScene extends BaseScene {
     this.phase = state.phase ?? 'waiting';
     this.updatePhaseOverlay(state.phase, state.countdown ?? 0, state.winner ?? '');
 
+    this.syncProjectiles(state.projectiles);
+
     state.players.forEach((p: any, id: string) => {
       if (id === this.localSessionId) {
         if (!this.localInitialized) {
@@ -271,13 +290,21 @@ export class MultiplayerScene extends BaseScene {
           this.localInitialized = true;
           this.localPlayer.setPosition(p.x, p.y);
           this.localJumpsUsed = 0;
+          this.localLastHp = p.hp;
         } else {
-          // Server reconciliation: only hard-snap for large divergence (respawn, knockback).
-          // Avoid soft nudges — they cause a rubber-band feeling at 50Hz.
+          // Server reconciliation: snap when damage is received (knockback) or divergence
+          // is large (respawn / fell off map). Smaller threshold (64px) catches drift earlier
+          // and prevents the dramatic teleport a 128px threshold would produce.
           const dx = Math.abs(p.x - this.localPlayer.x);
           const dy = Math.abs(p.y - this.localPlayer.y);
-          if (dx > 128 || dy > 128) {
+          const tookDamage = this.localLastHp >= 0 && p.hp < this.localLastHp;
+          this.localLastHp = p.hp;
+
+          if (tookDamage || dx > 64 || dy > 64) {
             this.localPlayer.setPosition(p.x, p.y);
+            // Also sync velocity so the local body matches server (critical for knockback).
+            const body = this.localPlayer.body as Phaser.Physics.Arcade.Body;
+            body.setVelocity(p.velocityX, p.velocityY);
           }
         }
         this.updateLocalHud(p.hp, p.maxHp);
@@ -310,6 +337,50 @@ export class MultiplayerScene extends BaseScene {
         }
       }
     });
+  }
+
+  // ── Projectiles ───────────────────────────────────────────────────────────
+
+  private syncProjectiles(projMap: any) {
+    if (!projMap) return;
+
+    const activeIds = new Set<string>();
+
+    projMap.forEach((proj: any, id: string) => {
+      activeIds.add(id);
+      let ps = this.projectiles.get(id);
+      if (!ps) {
+        ps = { gfx: this.add.graphics().setDepth(8), x: proj.x, y: proj.y, vx: proj.velocityX, vy: proj.velocityY };
+        this.projectiles.set(id, ps);
+      } else {
+        // Authoritative snap — correct any DR drift
+        ps.x  = proj.x;  ps.y  = proj.y;
+        ps.vx = proj.velocityX; ps.vy = proj.velocityY;
+      }
+      this.drawProjectile(ps);
+    });
+
+    // Remove projectiles that no longer exist in state (hit wall/player or out of bounds)
+    const toDelete: string[] = [];
+    this.projectiles.forEach((ps, id) => { if (!activeIds.has(id)) toDelete.push(id); });
+    toDelete.forEach(id => { this.projectiles.get(id)?.gfx.destroy(); this.projectiles.delete(id); });
+  }
+
+  private drawProjectile(ps: { gfx: Phaser.GameObjects.Graphics; x: number; y: number; vx: number; vy: number }) {
+    const { gfx, x, y, vx, vy } = ps;
+    gfx.clear();
+    // Arrow head
+    gfx.fillStyle(0xffdd44, 1);
+    gfx.fillCircle(x, y, 5);
+    // Trail in the opposite direction of travel
+    const spd = Math.sqrt(vx * vx + vy * vy) || 1;
+    const nx = vx / spd;
+    const ny = vy / spd;
+    gfx.lineStyle(2, 0xffaa00, 0.7);
+    gfx.beginPath();
+    gfx.moveTo(x, y);
+    gfx.lineTo(x - nx * 14, y - ny * 14);
+    gfx.strokePath();
   }
 
   // ── Remote sprite ────────────────────────────────────────────────────────

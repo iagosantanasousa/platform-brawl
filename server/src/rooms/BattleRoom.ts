@@ -32,6 +32,11 @@ export class BattleRoom extends Room<{ state: BattleRoomState }> {
     this.onMessage<PlayerInput>('input', (client, input) => {
       if (this.state.phase !== 'battle') return;
       applyInput(this.state, client.sessionId, input);
+      // Push state immediately on attacks/combos so the opponent sees the hit
+      // without waiting up to one full tick (20 ms) for the next scheduled patch.
+      if (input.attack || input.combo) {
+        this.broadcastPatch();
+      }
     });
 
     this.onMessage<{ team: 'A' | 'B' }>('select_team', (client, { team }) => {
