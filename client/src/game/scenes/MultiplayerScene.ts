@@ -136,7 +136,17 @@ export class MultiplayerScene extends BaseScene {
       padding: { x: 10, y: 6 },
     }).setOrigin(0.5, 0).setDepth(200).setScrollFactor(0).setVisible(false);
 
-    // P → copia snapshot de debug pro clipboard
+    // Debug button — top-right corner, always visible
+    const debugBtn = this.add.text(map.width - 8, 8, '[ 📋 DEBUG ]', {
+      fontSize: '11px', color: '#aaffcc', backgroundColor: '#00000088',
+      padding: { x: 6, y: 4 },
+    }).setOrigin(1, 0).setDepth(200).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => debugBtn.setColor('#ffffff'))
+      .on('pointerout',  () => debugBtn.setColor('#aaffcc'))
+      .on('pointerdown', () => this.copyDebugToClipboard());
+
+    // P key also triggers it (fallback)
     this.input.keyboard!.on('keydown-P', () => this.copyDebugToClipboard());
 
     // Ping/pong for RTT measurement
