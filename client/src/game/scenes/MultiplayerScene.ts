@@ -342,7 +342,7 @@ export class MultiplayerScene extends BaseScene {
     const jitter = this.rttSamples.length > 1
       ? Math.round(Math.max(...this.rttSamples) - Math.min(...this.rttSamples))
       : 0;
-    const snapCount = (this.SI.vault as any).list?.()?.length ?? (this.SI.vault as any).size?.() ?? '?';
+    const snapCount = this.SI.vault.size;
     const remoteHp  = this.remoteState ? `${this.remoteState.hp}/${this.remoteState.maxHp}` : 'N/A';
     const localHp   = `${this.localPlayer.hp}/${this.localPlayer.maxHp}`;
     return [
