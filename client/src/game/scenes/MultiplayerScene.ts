@@ -76,13 +76,13 @@ export class MultiplayerScene extends BaseScene {
   }>();
 
   // Ping / debug
-  private pingTimer    = 0;     // ms until next ping
-  private pingTs       = 0;     // timestamp of last ping sent
-  private rtt          = 0;     // last round-trip time in ms
+  private pingTimer      = 0;     // ms until next ping
+  private pingTs         = 0;     // timestamp of last ping sent
+  private rtt            = 0;     // last round-trip time in ms
   private rttSamples: number[] = [];
-  private lastDivergence = 0;   // px divergence at last reconciliation
-  private debugVisible = false;
-  private debugText!:  Phaser.GameObjects.Text;
+  private lastDivergence = 0;     // px divergence at last reconciliation
+  private toastTimer     = 0;     // ms remaining for toast visibility
+  private toastText!:    Phaser.GameObjects.Text;
 
   // Game state
   private localSessionId    = '';
@@ -130,16 +130,14 @@ export class MultiplayerScene extends BaseScene {
       this.onBack();
     });
 
-    // Debug overlay — toggle with P
-    this.debugText = this.add.text(map.width - 8, 8, '', {
-      fontSize: '11px', color: '#00ff88', backgroundColor: '#00000099',
-      padding: { x: 6, y: 4 }, lineSpacing: 2,
-    }).setOrigin(1, 0).setDepth(200).setScrollFactor(0).setVisible(false);
+    // Toast notification ("Copiado!")
+    this.toastText = this.add.text(map.width / 2, 40, '', {
+      fontSize: '13px', color: '#00ff88', backgroundColor: '#00000099',
+      padding: { x: 10, y: 6 },
+    }).setOrigin(0.5, 0).setDepth(200).setScrollFactor(0).setVisible(false);
 
-    this.input.keyboard!.on('keydown-P', () => {
-      this.debugVisible = !this.debugVisible;
-      this.debugText.setVisible(this.debugVisible);
-    });
+    // P → copia snapshot de debug pro clipboard
+    this.input.keyboard!.on('keydown-P', () => this.copyDebugToClipboard());
 
     // Ping/pong for RTT measurement
     room.onMessage('pong', ({ ts }: { ts: number }) => {
@@ -309,23 +307,50 @@ export class MultiplayerScene extends BaseScene {
       try { room.send('ping', { ts: this.pingTs }); } catch { /* ignore if not connected */ }
     }
 
-    // Debug overlay update
-    if (this.debugVisible) {
-      const fps    = Math.round(this.game.loop.actualFps);
-      const jitter = this.rttSamples.length > 1
-        ? Math.round(Math.max(...this.rttSamples) - Math.min(...this.rttSamples))
-        : 0;
-      const snapCount = (this.SI.vault as any).list?.()?.length ?? (this.SI.vault as any).size?.() ?? '?';
-      this.debugText.setText([
-        `[ DEBUG — tecla P para fechar ]`,
-        `Ping (RTT médio): ${this.rtt} ms  ±${jitter} ms`,
-        `FPS: ${fps}`,
-        `Fase: ${this.phase}`,
-        `Snapshots no buffer: ${snapCount}  (alvo ${INTERPOLATION_BUFFER} ms)`,
-        `Última divergência: ${Math.round(this.lastDivergence)} px`,
-        `Projéteis ativos: ${this.projectiles.size}`,
-      ].join('\n'));
+    // Toast fade-out
+    if (this.toastTimer > 0) {
+      this.toastTimer -= delta;
+      if (this.toastTimer <= 0) this.toastText.setVisible(false);
     }
+  }
+
+  private buildDebugSnapshot(): string {
+    const fps    = Math.round(this.game.loop.actualFps);
+    const jitter = this.rttSamples.length > 1
+      ? Math.round(Math.max(...this.rttSamples) - Math.min(...this.rttSamples))
+      : 0;
+    const snapCount = (this.SI.vault as any).list?.()?.length ?? (this.SI.vault as any).size?.() ?? '?';
+    const remoteHp  = this.remoteState ? `${this.remoteState.hp}/${this.remoteState.maxHp}` : 'N/A';
+    const localHp   = `${this.localPlayer.hp}/${this.localPlayer.maxHp}`;
+    return [
+      `=== Platform Brawl Debug Snapshot ===`,
+      `Timestamp: ${new Date().toISOString()}`,
+      `Ping RTT (avg 10 samples): ${this.rtt} ms`,
+      `Jitter (max-min): ±${jitter} ms`,
+      `RTT samples: [${this.rttSamples.join(', ')}]`,
+      `FPS: ${fps}`,
+      `Fase: ${this.phase}`,
+      `Interpolation buffer target: ${INTERPOLATION_BUFFER} ms`,
+      `Snapshots in vault: ${snapCount}`,
+      `Última reconciliação divergência: ${Math.round(this.lastDivergence)} px`,
+      `Projéteis ativos: ${this.projectiles.size}`,
+      `Local HP: ${localHp}  |  Remote HP: ${remoteHp}`,
+      `Personagem local: ${this.config.characterType}`,
+      `Remote char: ${this.remoteState?.characterType ?? 'N/A'}`,
+    ].join('\n');
+  }
+
+  private copyDebugToClipboard() {
+    const text = this.buildDebugSnapshot();
+    navigator.clipboard.writeText(text).then(() => {
+      this.toastText.setText('✓ Debug copiado! Cole no chat.').setVisible(true);
+      this.toastTimer = 2500;
+    }).catch(() => {
+      // Fallback: log to console so user can copy from devtools
+      console.log(text);
+      this.toastText.setText('Abra o console (F12) e copie de lá.').setVisible(true);
+      this.toastTimer = 3000;
+    });
   }
 
   // ── State sync ────────────────────────────────────────────────────────────
