@@ -3,6 +3,7 @@ import { SnapshotInterpolation } from '@geckos.io/snapshot-interpolation';
 import type { GameConfig } from '../../App';
 import { BaseScene } from './BaseScene';
 import { Player } from '../entities/Player';
+import { Projectile } from '../entities/Projectile';
 import { CHARACTER_CONFIGS, MAP_CONFIGS } from 'shared';
 import type { CharacterType } from 'shared';
 
@@ -69,10 +70,19 @@ export class MultiplayerScene extends BaseScene {
 
   // Projectile visuals with dead-reckoning state (arrows/projectiles for both players)
   private projectiles = new Map<string, {
-    gfx: Phaser.GameObjects.Graphics;
+    sprite: Projectile;
     x: number; y: number;
     vx: number; vy: number;
   }>();
+
+  // Ping / debug
+  private pingTimer    = 0;     // ms until next ping
+  private pingTs       = 0;     // timestamp of last ping sent
+  private rtt          = 0;     // last round-trip time in ms
+  private rttSamples: number[] = [];
+  private lastDivergence = 0;   // px divergence at last reconciliation
+  private debugVisible = false;
+  private debugText!:  Phaser.GameObjects.Text;
 
   // Game state
   private localSessionId    = '';
@@ -118,6 +128,25 @@ export class MultiplayerScene extends BaseScene {
     this.input.keyboard!.on('keydown-ESC', () => {
       room.leave();
       this.onBack();
+    });
+
+    // Debug overlay — toggle with P
+    this.debugText = this.add.text(map.width - 8, 8, '', {
+      fontSize: '11px', color: '#00ff88', backgroundColor: '#00000099',
+      padding: { x: 6, y: 4 }, lineSpacing: 2,
+    }).setOrigin(1, 0).setDepth(200).setScrollFactor(0).setVisible(false);
+
+    this.input.keyboard!.on('keydown-P', () => {
+      this.debugVisible = !this.debugVisible;
+      this.debugText.setVisible(this.debugVisible);
+    });
+
+    // Ping/pong for RTT measurement
+    room.onMessage('pong', ({ ts }: { ts: number }) => {
+      const sample = Date.now() - ts;
+      this.rttSamples.push(sample);
+      if (this.rttSamples.length > 10) this.rttSamples.shift();
+      this.rtt = Math.round(this.rttSamples.reduce((a, b) => a + b, 0) / this.rttSamples.length);
     });
 
     this.setupCamera(this.localPlayer);
@@ -170,12 +199,12 @@ export class MultiplayerScene extends BaseScene {
         const { dx, dy } = this.getArcherAimDir(this.localPlayer.facing);
         this.localPlayer.updateArcherAim(dx, dy);
       } else if (this.localPlayer.archerAiming) {
-        // Key released — capture aim direction and fire
+        // Key released — capture aim direction and fire.
+        // Matches TrainingScene: no triggerAttackAnim() for archer — the flying arrow is the visual.
         this.archerFireDx = this.localPlayer.archerAimDx;
         this.archerFireDy = this.localPlayer.archerAimDy;
         this.pendingAttack = true;
         if (this.localPlayer.attackCooldown <= 0) {
-          this.localPlayer.triggerAttackAnim();
           this.localPlayer.attackCooldown = cfg.attackCooldown * 0.5;
         }
         this.localPlayer.cancelArcherAim();
@@ -269,8 +298,34 @@ export class MultiplayerScene extends BaseScene {
     this.projectiles.forEach((ps) => {
       ps.x += ps.vx * dt;
       ps.y += ps.vy * dt;
-      this.drawProjectile(ps);
+      ps.sprite.setPosition(ps.x, ps.y);
     });
+
+    // Ping (every 2 s)
+    this.pingTimer -= delta;
+    if (this.pingTimer <= 0) {
+      this.pingTimer = 2000;
+      this.pingTs = Date.now();
+      try { room.send('ping', { ts: this.pingTs }); } catch { /* ignore if not connected */ }
+    }
+
+    // Debug overlay update
+    if (this.debugVisible) {
+      const fps    = Math.round(this.game.loop.actualFps);
+      const jitter = this.rttSamples.length > 1
+        ? Math.round(Math.max(...this.rttSamples) - Math.min(...this.rttSamples))
+        : 0;
+      const snapCount = (this.SI.vault as any).list?.()?.length ?? (this.SI.vault as any).size?.() ?? '?';
+      this.debugText.setText([
+        `[ DEBUG — tecla P para fechar ]`,
+        `Ping (RTT médio): ${this.rtt} ms  ±${jitter} ms`,
+        `FPS: ${fps}`,
+        `Fase: ${this.phase}`,
+        `Snapshots no buffer: ${snapCount}  (alvo ${INTERPOLATION_BUFFER} ms)`,
+        `Última divergência: ${Math.round(this.lastDivergence)} px`,
+        `Projéteis ativos: ${this.projectiles.size}`,
+      ].join('\n'));
+    }
   }
 
   // ── State sync ────────────────────────────────────────────────────────────
@@ -297,6 +352,7 @@ export class MultiplayerScene extends BaseScene {
           // and prevents the dramatic teleport a 128px threshold would produce.
           const dx = Math.abs(p.x - this.localPlayer.x);
           const dy = Math.abs(p.y - this.localPlayer.y);
+          this.lastDivergence = Math.max(dx, dy);
           const tookDamage = this.localLastHp >= 0 && p.hp < this.localLastHp;
           this.localLastHp = p.hp;
 
@@ -350,37 +406,26 @@ export class MultiplayerScene extends BaseScene {
       activeIds.add(id);
       let ps = this.projectiles.get(id);
       if (!ps) {
-        ps = { gfx: this.add.graphics().setDepth(8), x: proj.x, y: proj.y, vx: proj.velocityX, vy: proj.velocityY };
+        // Use the same Projectile entity as offline mode: arrow_proj texture + rotated sprite.
+        // Pass velocity = 0 and disable body — we drive position manually from server state.
+        const sprite = new Projectile(this, proj.x, proj.y, 'archer', proj.ownerId, 0, 0);
+        (sprite.body as Phaser.Physics.Arcade.Body).enable = false;
+        sprite.setRotation(Math.atan2(proj.velocityY, proj.velocityX));
+        ps = { sprite, x: proj.x, y: proj.y, vx: proj.velocityX, vy: proj.velocityY };
         this.projectiles.set(id, ps);
       } else {
         // Authoritative snap — correct any DR drift
         ps.x  = proj.x;  ps.y  = proj.y;
         ps.vx = proj.velocityX; ps.vy = proj.velocityY;
+        ps.sprite.setRotation(Math.atan2(ps.vy, ps.vx));
       }
-      this.drawProjectile(ps);
+      ps.sprite.setPosition(ps.x, ps.y);
     });
 
-    // Remove projectiles that no longer exist in state (hit wall/player or out of bounds)
+    // Remove projectiles no longer in state (hit wall/player or out of bounds)
     const toDelete: string[] = [];
     this.projectiles.forEach((ps, id) => { if (!activeIds.has(id)) toDelete.push(id); });
-    toDelete.forEach(id => { this.projectiles.get(id)?.gfx.destroy(); this.projectiles.delete(id); });
-  }
-
-  private drawProjectile(ps: { gfx: Phaser.GameObjects.Graphics; x: number; y: number; vx: number; vy: number }) {
-    const { gfx, x, y, vx, vy } = ps;
-    gfx.clear();
-    // Arrow head
-    gfx.fillStyle(0xffdd44, 1);
-    gfx.fillCircle(x, y, 5);
-    // Trail in the opposite direction of travel
-    const spd = Math.sqrt(vx * vx + vy * vy) || 1;
-    const nx = vx / spd;
-    const ny = vy / spd;
-    gfx.lineStyle(2, 0xffaa00, 0.7);
-    gfx.beginPath();
-    gfx.moveTo(x, y);
-    gfx.lineTo(x - nx * 14, y - ny * 14);
-    gfx.strokePath();
+    toDelete.forEach(id => { this.projectiles.get(id)?.sprite.destroy(); this.projectiles.delete(id); });
   }
 
   // ── Remote sprite ────────────────────────────────────────────────────────
@@ -423,15 +468,18 @@ export class MultiplayerScene extends BaseScene {
     const sprite = this.remoteSprite!;
     const prefix = this.remoteAnimPrefix;
 
-    // Detect new attack — play one-shot immediately
+    // Detect new attack — play one-shot immediately.
+    // Archer: skip the attack anim — the flying arrow projectile is the visual cue.
     if (state.attackCount !== this.remoteAttackCount) {
       this.remoteAttackCount = state.attackCount;
-      const seq = state.attackCount % 3;
-      const key = seq === 0 ? `${prefix}_attack` : seq === 1 ? `${prefix}_attack2` : `${prefix}_attack3`;
-      if (this.anims.exists(key)) {
-        sprite.play(key, false);
-        this.remoteCurrentAnim = key;
-        return;
+      if (prefix !== 'archer') {
+        const seq = state.attackCount % 3;
+        const key = seq === 0 ? `${prefix}_attack` : seq === 1 ? `${prefix}_attack2` : `${prefix}_attack3`;
+        if (this.anims.exists(key)) {
+          sprite.play(key, false);
+          this.remoteCurrentAnim = key;
+          return;
+        }
       }
     }
 

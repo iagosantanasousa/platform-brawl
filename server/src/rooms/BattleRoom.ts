@@ -81,6 +81,11 @@ export class BattleRoom extends Room<{ state: BattleRoomState }> {
       const player = this.state.players.get(client.sessionId);
       if (player) player.isReady = false;
     });
+
+    // Ping/pong — echoes the client timestamp back for RTT measurement
+    this.onMessage<{ ts: number }>('ping', (client, { ts }) => {
+      client.send('pong', { ts });
+    });
   }
 
   onJoin(client: Client, options: JoinOptions) {
