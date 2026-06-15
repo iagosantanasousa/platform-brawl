@@ -82,6 +82,8 @@ export class MultiplayerScene extends BaseScene {
   private lastDivergence = 0;     // px divergence at last reconciliation
   private toastTimer     = 0;     // ms remaining for toast visibility
   private toastText!:    Phaser.GameObjects.Text;
+  private debugPanel!:   Phaser.GameObjects.Text;
+  private debugVisible   = true;  // shown by default so user always sees ping
 
   // Game state
   private localSessionId    = '';
@@ -135,7 +137,14 @@ export class MultiplayerScene extends BaseScene {
       padding: { x: 10, y: 6 },
     }).setOrigin(0.5, 0).setDepth(200).setScrollFactor(0).setVisible(false);
 
-    // Debug button — top-left in actual screen coords (safe on any window size)
+    // Live debug panel — bottom-left, always visible, updates every frame
+    this.debugPanel = this.add.text(8, this.scale.height - 8, '', {
+      fontSize: '11px', color: '#00ff88', backgroundColor: '#00000099',
+      padding: { x: 6, y: 4 },
+      lineSpacing: 2,
+    }).setOrigin(0, 1).setDepth(200).setScrollFactor(0);
+
+    // Debug button — toggles the live panel and copies snapshot to clipboard
     const debugBtn = this.add.text(8, 48, '[DEBUG]', {
       fontSize: '12px', color: '#aaffcc', backgroundColor: '#000000bb',
       padding: { x: 6, y: 4 },
@@ -145,8 +154,12 @@ export class MultiplayerScene extends BaseScene {
       .on('pointerout',  () => debugBtn.setColor('#aaffcc'))
       .on('pointerdown', () => this.copyDebugToClipboard());
 
-    // P key also triggers it
+    // P key copies, D key toggles panel visibility
     this.input.keyboard!.on('keydown-P', () => this.copyDebugToClipboard());
+    this.input.keyboard!.on('keydown-D', () => {
+      this.debugVisible = !this.debugVisible;
+      this.debugPanel.setVisible(this.debugVisible);
+    });
 
     // Ping/pong for RTT measurement
     room.onMessage('pong', ({ ts }: { ts: number }) => {
@@ -328,6 +341,21 @@ export class MultiplayerScene extends BaseScene {
       if (this.phase === 'battle') {
         console.log('%c[DEBUG]', 'color:#00ff88;font-weight:bold', this.buildDebugSnapshot());
       }
+    }
+
+    // Live debug panel update (every frame — cheap text ops)
+    if (this.debugVisible) {
+      const fps     = Math.round(this.game.loop.actualFps);
+      const jitter  = this.rttSamples.length > 1
+        ? Math.round(Math.max(...this.rttSamples) - Math.min(...this.rttSamples)) : 0;
+      const remoteHp = this.remoteState ? `${this.remoteState.hp}/${this.remoteState.maxHp}` : '–';
+      this.debugPanel.setText([
+        `Ping: ${this.rtt} ms  jitter: ±${jitter} ms`,
+        `FPS: ${fps}   snapshots: ${this.SI.vault.size}`,
+        `divergencia: ${Math.round(this.lastDivergence)} px`,
+        `HP local: ${this.localPlayer.hp}/${this.localPlayer.maxHp}   remoto: ${remoteHp}`,
+        `fase: ${this.phase}   [P]=copiar debug`,
+      ].join('\n'));
     }
 
     // Toast fade-out
